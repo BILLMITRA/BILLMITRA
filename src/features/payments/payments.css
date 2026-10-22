@@ -1,0 +1,24 @@
+.history-backdrop { position: fixed; z-index: 19; inset: 0; display: grid; place-items: center; padding: 22px; background: #16231bc9; }
+.history-dialog { width: min(760px, 100%); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; background: #fff; box-shadow: 0 20px 70px #0005; }
+.history-heading { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px 15px; border-bottom: 1px solid #edf0ed; }
+.history-heading h2 { margin: 4px 0; color: #27372d; font: 700 19px 'Manrope', sans-serif; }
+.history-heading p { margin: 0; color: #849087; font-size: 10px; }
+.history-close { width: 34px; height: 34px; border: 1px solid #e5e9e5; border-radius: 8px; display: grid; place-items: center; background: #fff; color: #667269; cursor: pointer; }
+.history-search { min-height: 38px; display: flex; align-items: center; gap: 8px; margin: 14px 20px 8px; padding: 0 10px; border: 1px solid #e5e9e5; border-radius: 8px; color: #89948c; }
+.history-search input { width: 100%; border: 0; outline: 0; color: #344239; background: transparent; font: inherit; font-size: 11px; }
+.history-error { margin: 4px 20px 8px; color: #a3473b; font-size: 10px; }
+.history-list { min-height: 110px; overflow-y: auto; padding: 0 20px; }
+.history-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 2px; border-bottom: 1px solid #eff2ef; }
+.history-row-main, .history-row-end { display: grid; gap: 4px; }
+.history-row-main > span { color: #5f6c63; font-size: 10px; }
+.history-row small, .history-row-end small { color: #909a93; font-size: 9px; }
+.history-row-title { display: flex; align-items: center; gap: 8px; }
+.history-row-title > strong, .history-row-end > strong { color: #344239; font-size: 11px; }
+.history-status { border-radius: 10px; padding: 3px 7px; font-size: 8px; font-weight: 700; }
+.history-status.paid { color: #27734b; background: #eaf6ee; }
+.history-status.unpaid { color: #a37337; background: #fff4e6; }
+.history-status.voided { color: #a3473b; background: #fff0ed; }
+.history-row-end { justify-items: end; flex: none; }
+.history-row-end button { min-height: 27px; border: 1px solid #dce8df; border-radius: 6px; padding: 0 9px; background: #f4faf5; color: #286f4c; font-size: 9px; font-weight: 700; cursor: pointer; }
+.history-empty { padding: 36px 12px; color: #89948c; text-align: center; font-size: 11px; }
+.history-footer { padding: 11px 20px; border-top: 1px solid #edf0ed; color: #8d978f; font-size: 9px; }

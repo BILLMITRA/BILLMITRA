@@ -1,0 +1,4 @@
+{$BILLMITRA_DOMAIN} {
+  encode gzip
+  reverse_proxy billing:3000
+}

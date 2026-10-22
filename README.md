@@ -1,60 +1,70 @@
 # BillMitra
 
-BillMitra is an original restaurant point-of-sale MVP built with React, TypeScript, Electron, and SQLite. The current milestone covers the local cashier workflow: floor/table selection, a searchable sample menu, dine-in/takeaway/delivery drafts, quantities and item notes, GST-aware bill totals, and saving an open order to the cashier computer.
+Restaurant billing software built with React, TypeScript, Electron, Node.js and SQLite. It runs as a Windows desktop application or a browser application served by Node.js. This remains a development build; visual end-to-end checks, production load testing, invoice requirements, and deployment verification are outstanding.
 
-This is a development/demo build, not a production-ready or tax-certified POS. On first launch, create a local owner account; the owner can create local staff accounts with one of the fixed roles. Passwords are scrypt-hashed in the main process, and privileged IPC operations enforce role permissions. Manager/owner roles can apply discounts and void bills; voiding also requires a device-local manager PIN and a reason. Five failed PIN attempts lock voiding for five minutes. The manager PIN is set once and has no recovery/reset screen, so keep it safe. The cashier can apply permitted fixed or percentage invoice discounts, with tax recalculated on discounted item amounts; saved invoices can be previewed and printed through the system print dialog. Cashiers can record full-bill Cash, UPI, or external-terminal Card payments locally and search bill history. A saved bill can produce a duplicate kitchen ticket in the system print dialog; this is a local print request, not a kitchen display or printer integration. The local Delivery Schedule manages real saved delivery orders, rider capacity and availability, assignment/reassignment, pickup readiness, dispatch, completion, failure and cancellation history. Delivery completion never records payment. Delivery operations remain on this device and do not provide GPS tracking, rider logins, routing, cloud synchronization, or a configured business timezone. The staff-call control remains unavailable until the waiter workflow is implemented. Payments are records only; no payment gateway, settlement verification, partial payment, refund, or card-data collection is implemented. Staff roles for kitchen, inventory, and accounting are defined, but their respective workspaces are not implemented. Real payment processing, printer integration, kitchen and waiter clients, reports, inventory workflows, and cloud/multi-branch synchronization are not implemented. No payment-card data is collected or stored. Local accounts are device-specific and are not a substitute for a centrally managed identity system.
+## Run
 
-## Architecture and library choices
-
-- React 19 and TypeScript implement the cashier renderer; Vite 8 serves it in development and produces the packaged web assets.
-- Electron 44 hosts the Windows desktop app. Its renderer has context isolation enabled, Node integration disabled, and accesses only a small preload API.
-- Electron's bundled Node 24 `node:sqlite` API provides local SQLite without an extra native-addon compiler/rebuild requirement. The main process applies a versioned schema migration, enables WAL/foreign keys, and commits order writes transactionally.
-- Zod validates order and staff payloads at the IPC boundary. Shared TypeScript order types and integer-paise billing functions keep totals consistent across the UI and main process.
-- Local username/password authentication uses scrypt hashes, in-memory Electron-window sessions, a five-attempt account lockout, and a fixed role/permission matrix enforced in the main process. Staff sessions end when the app process exits.
-- The local delivery workflow is isolated in `electron/services/deliveryManagement.cts`, exposed through validated, permission-checked IPC, and persisted in additive SQLite migration 11. Rider capacity is rechecked inside `BEGIN IMMEDIATE` transactions at assignment time.
-- Vitest 5 covers billing arithmetic, staff permissions/authentication, delivery lifecycle and search/delay rules, and SQLite schemas; Oxlint checks source. Electron Builder creates the Windows NSIS installer.
-
-## Project structure
-
-```text
-src/
-  assets/       Renderer images and static assets
-  components/   Reusable interface components (table cards)
-  features/     Feature modules (billing, delivery schedule and rider assignment, kitchen tickets, payments, security, staff)
-  pages/        Application pages (cashier)
-  services/     Renderer-to-Electron API calls
-  styles/       Global and cashier stylesheets
-  types/        Renderer and cart types
-  utils/        Presentation and formatting helpers
-electron/       Desktop main process and preload bridge
-shared/         Types and billing logic used by both processes
-public/         Static files copied by Vite
-```
-
-The current application still has one cashier page. Staff management supports creating and listing accounts, but does not yet support account editing, password reset, or account deactivation. Role permissions are fixed in code rather than configurable per permission. Dedicated inventory, customer, report, hook, and layout modules will be introduced alongside those features rather than as empty folders. SQLite and migration ownership remains in Electron's main process.
-
-## Table ordering
-
-The cashier opens on an **All tables** view for dine-in across every floor. Use the floor selector to narrow the list, or select a physical table card to open its order workflow. Takeaway has a dedicated screen with 100 selectable cards, `P-1` through `P-100`; home delivery has a separate set of 100 cards, `HD-1` through `HD-100`. Available cards start an order; active cards reopen it. A slot is released when its bill is paid or voided and can then be reused. Historical bills keep their original P/HD reference in history, invoices, and kitchen tickets. For a new delivery, add items and press **Done** to save the food order first. BillMitra then opens a full-screen recipient-details step; contact number and delivery address are required, while name, area, landmark, and rider instructions are optional. Entering a phone number used on a previous delivery looks up the latest saved delivery details on this device and fills them in; the current order's recipient details are stored with its bill. The right panel previews recipient details, ordered items, and the total before saving and opening the KOT print dialog. Use **Print KOT** to send the ticket to the selected system printer. **Print bill** opens the invoice/receipt preview for printing after the order is saved. The delivery bill includes a persistent **Delivery Schedules** and **Assign Delivery** toolbar. A promised delivery time can be selected before saving or edited in the saved Delivery Schedule. Use the **Delivery schedule** workspace for live persisted orders, date/status filters, rider workload, assignment/reassignment, order details, and event history. Managers/owners add and maintain riders; the default concurrent-delivery capacity is one. A cashier can mark an order ready, assign an available rider, dispatch, complete, or report failure. Reassignment and cancellation require manager/owner permission and a reason. Each transition is saved locally and audited. The delivery lifecycle is separate from food preparation and bill payment; completing delivery never settles an unpaid invoice. Existing free-text courier names from older orders remain visible as unverified legacy values until a real rider is assigned. After selecting a takeaway or delivery slot, the left side switches to the compact menu, with the bill and customer details on the right. In an open table order, the left side switches directly to a compact category-and-product tile menu inspired by the quick selection workflow in the reference; the table selector, bill, and cashier actions remain on the right. Use **Find a menu item** in the bill panel (or Ctrl+K) to search all available products, then select a result or press Enter to add it to the bill. Use **All tables** to return to the dine-in floor overview. Table cards show their floor, availability/order status, elapsed time, and current order amount where applicable.
-
-## Requirements
-
-- Windows 10/11 (for desktop use and Windows packaging)
-- Node.js 22.12 or newer and npm
-- Internet access for the first dependency install; local billing runs without internet after installation
-
-## Install and run
+Use Node.js 24 and npm. Install dependencies with `npm install` if needed.
 
 ```powershell
-npm install
-npm run dev
+npm run dev       # Windows desktop development
+npm run web       # Build and start the browser application
 ```
 
-`npm run dev` builds the Electron main/preload TypeScript, starts Vite, then opens the desktop app. The development window uses the same local SQLite database as the packaged app.
+Open **http://127.0.0.1:3000** for browser access. After a build, `npm run start:web` starts the server directly. Vite preview does not supply the API. The browser server binds only to this computer by default.
 
-On first launch, create the owner username, display name, and password (minimum 12 characters). Then use the **Staff** action to create cashier, manager, kitchen, inventory, or accountant accounts. Staff should sign out before handing the workstation to someone else. No default credentials are installed. No `.env` file, API key, or cloud service is required. All data for this milestone is local to the current Windows user.
+Create the owner account on first launch, then use **Staff** to create manager, cashier, waiter, kitchen, inventory, or accountant accounts. Passwords require at least 12 characters. Roles are enforced in the backend. Owner-password recovery, password reset, and account editing/deactivation are not implemented.
 
-## Build, test, and package
+## Available workflows
+
+| Workspace | Features |
+| --- | --- |
+| Cashier | Dine-in tables, 100 takeaway slots, 100 delivery slots, item search, quantities, kitchen notes, discounts, invoice/KOT previews and system printing, bill history, PIN-approved voids |
+| Payments | Full or partial payments, split methods, payment/refund ledger, manager/owner refund records, retry protection and overpayment/refund limits |
+| Menu management | Owner/manager category creation/editing, item creation/editing, prices, configured tax rates and availability; historical invoice line snapshots stay unchanged |
+| Sales reports | Date-filtered paid sales, discounts, tax, collections, refunds, net collections, open balances, item quantities and CSV export; dates use UTC |
+| Inventory | Inventory items, units, reorder levels, signed stock adjustments, low-stock indicators and movement history |
+| Cash closing | Cash collections minus cash refunds since the last close, opening cash, counted cash, variance explanations and audited closings |
+| Kitchen | Live preparation tickets, separate batches for newly added items, preparing/ready/handed-over transitions; paid tickets remain visible until handed over |
+| Waiter | Dedicated table/menu view, item quantities and notes, new-order or existing-order additions; no payment, discount, refund or void access |
+| Delivery | Recipient details, saved-customer lookup, schedules, rider workload/capacity, assignment/reassignment and delivery lifecycle/history |
+| Backups | Owner-only manual snapshots, startup snapshots for existing databases, automatic snapshots every 24 hours while running, integrity verification and an offline restore command |
+| Branches | Configurable browser branches with separate databases and staff sessions; branch selection before sign-in |
+
+Cashier owners/managers open **Management** for menu, reports, inventory, kitchen, cash closing and backups. Kitchen, inventory and accountant accounts open their permitted workspace after sign-in. Waiter accounts open the table-ordering screen; owners/managers can also open it with **Waiter**. Open a saved bill and choose **Split payment / refunds** to inspect or record payments and refunds.
+
+Payments and refunds are records of money processed elsewhere. There is no payment gateway or settlement verification, and no card details are collected. Refunds preserve the original invoice; automatic credit-note/tax adjustment documents are not implemented. Bills with unrefunded payments cannot be edited or voided. A fully settled invoice stays settled after a refund.
+
+Inventory movements are manual; recipes, purchasing, suppliers, stock valuation, inter-branch transfers, and automatic ingredient deduction are not implemented. Cash closing does not track drawer expenses, bank withdrawals, or individual cashier shifts. Kitchen tickets do not provide station routing or printer hardware integration. The staff-call button remains unavailable.
+
+## Branch configuration and data
+
+`branches.json` currently configures **Vengara** with the stable ID `main`. Add branches to this file, or override the web server list through the environment:
+
+```powershell
+$env:BILLMITRA_BRANCHES = '[{"id":"main","name":"Main branch"},{"id":"north","name":"North branch"}]'
+npm run start:web
+```
+
+Branch IDs are stable lowercase slugs. Each branch has independent owner/staff accounts, menu, stock, bills, closings and backups. The default `main` database is `web-data/billmitra-web.sqlite`; other branches use `web-data/branch-<id>.sqlite`. Change the storage directory with `BILLMITRA_WEB_DATA_DIR` and the port with `BILLMITRA_WEB_PORT`. Accounts and sessions cannot be reused across branches. There is no organization-wide staff administration or consolidated branch report yet.
+
+The desktop database remains `harbor-pos.sqlite` under Electron's per-user `userData` directory. **Desktop and browser databases are not synchronized.** Desktop billing continues locally without internet; the browser requires its server. Offline desktop/cloud synchronization remains unfinished and must be completed before a unified multi-branch release.
+
+Browser sessions use HttpOnly, SameSite cookies and expire after eight hours without activity or on server restart. API requests enforce same-origin checks, JSON limits and role permissions. Public/network hosting requires an HTTPS origin and a server setup token. See [deployment preparation](docs/deployment.md); no online deployment has been made.
+
+## Backup and restore
+
+Snapshots are saved under `backups/` beside the relevant database. They contain accounts and business data. Keep a separate secure copy outside the computer/server; snapshots on the same disk do not protect against disk loss. Backups are not automatically deleted or exported offsite.
+
+To restore, stop all desktop/server processes that use the target database, then run:
+
+```powershell
+npm run restore -- "C:\path\to\database.sqlite" "C:\path\to\backup.sqlite"
+```
+
+The command verifies SQLite integrity, foreign keys and supported migration versions, rejects an active database lease, restores through a staging file, and retains the previous database as a `.before-restore-*.sqlite` recovery file. Run the application again and verify the restored records before returning to work. Restore has been tested using temporary databases; no existing business database was restored during development.
+
+## Verification and packaging
 
 ```powershell
 npm test
@@ -63,27 +73,8 @@ npm run build
 npm run package:win
 ```
 
-The Windows installer is written to `release/`. SQLite uses Node's built-in `node:sqlite` API, so there is no separate native-addon rebuild step. Test the installer on a clean Windows machine before distributing it.
+Tests cover billing arithmetic, staff permissions, delivery, browser sessions and branch isolation, migrations, menu snapshots, inventory rollback/retries, kitchen batches, waiter restrictions, split payments, refunds, cash reconciliation and backup/restore. The Windows installer is written to `release/`; verify it on a clean Windows machine before distributing it.
 
-## Local data, migrations, and backup
+The backend uses integer paise, SQLite WAL/foreign keys, transactions, Zod validation, scrypt password hashes, idempotent payment/stock request IDs and audit records. New operations are in `electron/services/`; both Electron IPC and the browser API invoke `electron/backend.cts`. Migrations currently run through version 15.
 
-The Electron main process owns SQLite through Node's built-in `node:sqlite` API and accepts only validated requests over a context-isolated preload bridge. The database is created at Electron's per-user `app.getPath('userData')` location as `harbor-pos.sqlite`. That filename is retained for compatibility with existing installations. It is local to this Windows user and is not synchronized or shared between devices.
-
-Versioned migrations are in `electron/main.cts`; schema definitions are in `electron/database/`. Migration 11 adds local delivery riders, execution status, schedule/pickup/dispatch/completion timestamps, customer area/landmark/instructions, and delivery event history without deleting existing orders. Earlier free-text courier names are retained as legacy values and are not treated as verified rider assignments. The complete schema also includes the migration ledger, demo categories/products/tables, orders, immutable order-item price/tax snapshots, idempotency records, persisted invoice discounts/history, full-payment records, manager PIN credentials, void markers, audit records, reusable active takeaway (P-1 to P-100) and home-delivery (HD-1 to HD-100) slots, delivery metadata, and local staff accounts. Paid and voided bills are retained in history and released from active floor/table/service lists. If an existing database has more than 100 active orders of either numbered service type when upgrading, migration stops with an explicit error rather than hiding or reassigning some open bills. Back up the database, use the previous BillMitra version to pay or void enough active orders, then restart the upgrade. SQLite foreign keys and write-ahead logging are enabled. The first run seeds sample dishes and two floors; subsequent runs reuse the existing database.
-
-For a manual backup or restore, exit BillMitra completely first, then copy `harbor-pos.sqlite` from the app's user-data directory to a secure backup location. Restore by closing the app and replacing that file with the backup. Keep backups access-controlled; do not copy a live database. Verify restored bills and totals before returning to service. There is no in-app backup/restore screen in this milestone.
-
-## Tax and payment notes
-
-Prices are stored as integer paise and the demo catalog uses illustrative per-product GST basis-point values. Discounts are applied to the invoice subtotal before tax, proportionally across line items when fixed-amount discounts are used. GST is calculated in the application and shown separately; the rates, invoice format, rounding, discount treatment, and tax configuration have not been reviewed for any restaurant's legal or tax obligations. The invoice preview is explicitly marked as a demo and not tax-certified. Validate those details with a qualified adviser before real use. There are no real card payments or payment credentials in this build.
-
-## Next milestones
-
-1. Cashier shifts and day closing attributed to authenticated staff accounts, followed by waiter tablet/mobile ordering with a durable submission queue.
-2. Kitchen display with accepted/preparing/ready state transitions reflected in cashier and waiter views, plus the staff-call workflow.
-3. Delivery address correction from schedule details, shift-based schedule filters, retry/return policies, configured business timezone, and rider accounts/mobile workflow.
-4. Split/merge bills, account editing/deactivation and password reset, configurable granular permissions, manager PIN recovery, and printer adapters.
-5. Product/category and tax configuration, inventory records, sales summaries, and verified backup/restore UX.
-6. Secure multi-branch cloud service, authenticated synchronization, conflict resolution, and tested offline-to-online recovery.
-
-Cloud sync is not present. Do not treat demo tax settings, local single-device staff accounts, or test orders as operational compliance or production-grade centralized security.
+Tax rates and invoices remain demo configuration and are not tax-certified. Receipt/printer requirements, business timezone, payment integrations, synchronization, hosting, monitoring, recovery and release testing remain part of the [product plan](docs/restaurant-product-plan.md).

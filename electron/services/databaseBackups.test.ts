@@ -1,0 +1,53 @@
+import { afterEach, beforeEach, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createPosBackend } from '../backend.cjs'
+import { restoreDatabase } from './databaseBackups.cjs'
+import { DatabaseSync } from 'node:sqlite'
+import { randomUUID } from 'node:crypto'
+import type { BackupInfo, MenuCatalog } from '../../shared/restaurant'
+let directory: string
+let backend: ReturnType<typeof createPosBackend> | undefined
+let path: string
+const owner = { username: 'owner', displayName: 'Owner', password: 'backup-owner-password-123' }
+beforeEach(() => { directory = mkdtempSync(join(tmpdir(), 'billmitra-backup-test-')); path = join(directory, 'test.sqlite'); backend = createPosBackend(path); backend.invoke('staff:setup-owner', 1, owner) })
+afterEach(() => { backend?.close(); rmSync(directory, { recursive: true, force: true }) })
+it('backs up committed WAL data and restores it while retaining the previous database', () => {
+  const original = backend!.invoke('menu:catalog', 1) as MenuCatalog
+  const backup = backend!.invoke('backups:create', 1) as BackupInfo
+  expect(backup.sizeBytes).toBeGreaterThan(0)
+  backend!.invoke('menu:save-category', 1, { name: 'After backup', sortOrder: 20 })
+  expect(() => restoreDatabase(path, join(directory, 'backups', backup.name))).toThrow('already open')
+  backend!.close(); backend = undefined
+  const restored = restoreDatabase(path, join(directory, 'backups', backup.name))
+  expect(restored.previousDatabase && existsSync(restored.previousDatabase)).toBe(true)
+  backend = createPosBackend(path)
+  backend.invoke('staff:login', 1, owner)
+  expect((backend.invoke('menu:catalog', 1) as MenuCatalog).categories).toEqual(original.categories)
+  expect((backend.invoke('backups:list', 1) as BackupInfo[]).length).toBeGreaterThanOrEqual(2)
+})
+it('rejects invalid backups without changing the current database', () => {
+  const invalid = join(directory, 'invalid.sqlite'); writeFileSync(invalid, 'not a database')
+  expect(() => restoreDatabase(path, invalid)).toThrow()
+  expect((backend!.invoke('menu:catalog', 1) as MenuCatalog).categories.length).toBeGreaterThan(0)
+})
+it('prevents simultaneous access to the same database by another backend', () => {
+  expect(() => createPosBackend(path)).toThrow('already open')
+})
+it('does not resend historical paid orders to the kitchen when upgrading an older database', () => {
+  const catalog = backend!.invoke('menu:catalog', 1) as MenuCatalog
+  const makeOrder = (slot: number) => backend!.invoke('pos:create-order', 1, {
+    requestId: randomUUID(), type: 'parcel', tableId: null, parcelNumber: slot,
+    customerName: 'Guest', deliveryAddress: '', discount: null,
+    items: [{ productId: catalog.products.find(product => product.available)!.id, quantity: 1, note: '' }],
+  }) as { id: string }
+  const paid = makeOrder(1); const unpaid = makeOrder(2)
+  backend!.invoke('pos:record-payment', 1, { requestId: randomUUID(), orderId: paid.id, method: 'cash' })
+  backend!.close(); backend = undefined
+  const db = new DatabaseSync(path)
+  db.exec('DROP TABLE kitchen_tickets; DELETE FROM schema_migrations WHERE version = 15;'); db.close()
+  backend = createPosBackend(path); backend.invoke('staff:login', 1, owner)
+  const queue = backend.invoke('kitchen:queue', 1) as { orders: { id: string }[] }
+  expect(queue.orders.map(order => order.id)).toEqual([unpaid.id])
+})

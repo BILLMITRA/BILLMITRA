@@ -1,0 +1,33 @@
+services:
+  billing:
+    build: .
+    restart: unless-stopped
+    environment:
+      BILLMITRA_WEB_HOST: 0.0.0.0
+      BILLMITRA_WEB_DATA_DIR: /app/web-data
+      BILLMITRA_WEB_ORIGIN: https://${BILLMITRA_DOMAIN:?Set BILLMITRA_DOMAIN}
+      BILLMITRA_SETUP_TOKEN: ${BILLMITRA_SETUP_TOKEN:?Set a random setup token}
+      BILLMITRA_BRANCHES: ${BILLMITRA_BRANCHES:?Set the branch list}
+    volumes:
+      - billing-data:/app/web-data
+    expose:
+      - "3000"
+    stop_grace_period: 30s
+  gateway:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      BILLMITRA_DOMAIN: ${BILLMITRA_DOMAIN:?Set BILLMITRA_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - gateway-data:/data
+      - gateway-config:/config
+    depends_on:
+      - billing
+volumes:
+  billing-data:
+  gateway-data:
+  gateway-config:

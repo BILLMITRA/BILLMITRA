@@ -1,0 +1,20 @@
+.manager-action-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 20px; background: #16231bc9; }
+.manager-action-dialog { width: min(430px, 100%); padding: 23px; border: 1px solid #e8ece8; border-radius: 14px; background: #fff; box-shadow: 0 20px 70px #0005; }
+.manager-action-dialog > header { display: flex; align-items: center; justify-content: space-between; }
+.manager-action-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: #27734b; background: #eaf6ee; }
+.manager-action-icon.void { color: #a34b3f; background: #fff0ed; }
+.manager-action-close { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #e5e9e5; border-radius: 8px; background: #fff; color: #667269; cursor: pointer; }
+.manager-action-close:disabled { opacity: .5; }
+.manager-action-dialog h2 { margin: 17px 0 6px; color: #27372d; font: 700 20px/27px 'Manrope', sans-serif; }
+.manager-action-dialog > p { margin: 0 0 18px; color: #78847b; font-size: 11px; line-height: 17px; }
+.manager-action-field { display: grid; gap: 6px; margin-top: 12px; color: #4d5b51; font-size: 10px; font-weight: 700; }
+.manager-action-field input, .manager-action-field textarea { width: 100%; min-height: 42px; border: 1px solid #dfe6e0; border-radius: 8px; padding: 9px 11px; background: #fff; color: #344239; font-size: 13px; }
+.manager-action-field textarea { resize: vertical; font: inherit; font-size: 11px; line-height: 16px; }
+.manager-action-field input::placeholder, .manager-action-field textarea::placeholder { color: #a3aca5; font-weight: 400; }
+.manager-action-error { margin-top: 12px; padding: 9px 10px; border: 1px solid #f1d2ce; border-radius: 7px; color: #a3473b; background: #fff4f1; font-size: 10px; line-height: 15px; }
+.manager-action-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.manager-action-dialog footer button { min-height: 40px; padding: 0 13px; border: 1px solid #e1e7e2; border-radius: 7px; background: #fff; color: #5c695f; font-size: 10px; font-weight: 700; cursor: pointer; }
+.manager-action-dialog footer .manager-action-submit { border-color: #286f4c; background: #286f4c; color: #fff; }
+.manager-action-dialog footer .manager-action-submit.void { border-color: #a3473b; background: #a3473b; }
+.manager-action-dialog footer button:disabled { opacity: .6; cursor: wait; }
+.manager-action-security-note { display: block; margin-top: 12px; color: #89948c; font-size: 9px; line-height: 14px; }

@@ -13,6 +13,9 @@
     "test": "vitest run",
     "lint": "oxlint",
     "preview": "vite preview",
+    "start:web": "node electron-dist/electron/web.cjs",
+    "restore": "node electron-dist/electron/maintenance.cjs restore",
+    "web": "npm run build && npm run start:web",
     "package:win": "npm run build && electron-builder --win nsis --config.electronDist=node_modules/electron/dist"
   },
   "dependencies": {

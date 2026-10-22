@@ -11,6 +11,6 @@ export default defineConfig({
     },
   }],
   test: {
-    include: ['shared/**/*.test.ts', 'src/features/**/*.test.ts', 'electron/**/*.test.ts'],
+    include: ['shared/**/*.test.ts', 'src/**/*.test.ts', 'electron/**/*.test.ts'],
   },
 })

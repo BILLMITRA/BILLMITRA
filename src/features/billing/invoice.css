@@ -1,0 +1,42 @@
+.invoice-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 22px; background: #16231bc9; }
+.invoice-dialog { width: min(720px, 100%); max-height: 94vh; overflow: auto; border-radius: 14px; background: #eef1ee; box-shadow: 0 20px 70px #0005; }
+.invoice-actions { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #fff; border-bottom: 1px solid #e8ece8; color: #536057; font-size: 12px; font-weight: 700; }
+.invoice-actions > div { display: flex; align-items: center; gap: 8px; }
+.invoice-actions button { min-height: 34px; border: 1px solid #dce3dc; border-radius: 7px; padding: 0 11px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: #fff; color: #34443a; cursor: pointer; font-size: 11px; font-weight: 600; }
+.invoice-actions button:first-child { border-color: #286f4c; background: #286f4c; color: #fff; }
+.invoice-paper { max-width: 620px; margin: 18px auto; padding: 34px; background: #fff; color: #27342b; box-shadow: 0 2px 8px #223b2c12; }
+.invoice-brand, .invoice-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.invoice-brand > div { display: grid; gap: 3px; }
+.invoice-brand b { font-size: 22px; letter-spacing: -.6px; }
+.invoice-brand span, .invoice-meta span { color: #7d8980; font-size: 11px; text-transform: capitalize; }
+.invoice-brand > small { color: #9b6943; font-size: 9px; font-weight: 700; text-align: right; }
+.invoice-title-row { margin-top: 30px; padding: 17px 0; border-top: 1px solid #e8ece8; border-bottom: 1px solid #e8ece8; }
+.invoice-title-row > div:first-child > span { color: #79857c; font-size: 9px; font-weight: 700; letter-spacing: 1.2px; }
+.invoice-title-row h1 { margin: 5px 0 0; font-size: 20px; }
+.invoice-meta { display: grid; gap: 6px; text-align: right; font-size: 11px; }
+.invoice-customer { display: grid; gap: 5px; padding: 15px 0; color: #58645b; font-size: 11px; }
+.invoice-items { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 11px; }
+.invoice-items th { padding: 9px 5px; border-bottom: 1px solid #dfe5df; color: #79857c; font-size: 9px; text-align: left; text-transform: uppercase; }
+.invoice-items td { padding: 10px 5px; border-bottom: 1px solid #eef1ee; vertical-align: top; }
+.invoice-items th:nth-child(n+2), .invoice-items td:nth-child(n+2) { text-align: right; white-space: nowrap; }
+.invoice-items td:first-child { width: 50%; }
+.invoice-items td small { display: block; margin-top: 3px; color: #858f88; font-size: 9px; }
+.invoice-totals { width: min(300px, 100%); margin: 18px 0 0 auto; }
+.invoice-totals > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; color: #6e7a71; font-size: 11px; }
+.invoice-totals b { color: #344239; }
+.invoice-totals .invoice-grand-total { margin-top: 6px; padding-top: 12px; border-top: 1px solid #dfe5df; color: #23352a; font-size: 14px; font-weight: 700; }
+.invoice-grand-total b { color: #236d49; font-size: 17px; }
+.invoice-payment { margin-top: 15px; padding: 10px; border-radius: 6px; background: #eaf6ee; color: #27734b; font-size: 9px; font-weight: 700; text-align: center; letter-spacing: .4px; }
+.invoice-payment.invoice-voided { background: #fff0ed; color: #a3473b; }
+.invoice-disclaimer { margin-top: 24px; padding-top: 12px; border-top: 1px dashed #dfe5df; color: #888f89; font-size: 9px; line-height: 1.5; }
+
+@media print {
+  @page { margin: 12mm; }
+  body * { visibility: hidden !important; }
+  .print-document-backdrop, .print-document-backdrop * { visibility: visible !important; }
+  .print-document-backdrop { position: absolute; inset: 0; display: block; padding: 0; background: #fff; }
+  .print-document-dialog { width: 100%; max-height: none; overflow: visible; border-radius: 0; background: #fff; box-shadow: none; }
+  .print-document-actions { display: none; }
+  .invoice-paper { max-width: none; margin: 0; padding: 0; box-shadow: none; }
+  .kot-paper { width: 72mm; margin: 0; padding: 0; }
+}

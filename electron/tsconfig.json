@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "..",
+    "outDir": "../electron-dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["./**/*.cts", "../shared/billing.ts", "../shared/domain.ts", "../shared/managerSecurity.ts", "../shared/staffSecurity.ts", "../shared/staffPermissions.ts"]
+}
