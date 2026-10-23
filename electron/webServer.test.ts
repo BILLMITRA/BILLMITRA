@@ -8,6 +8,7 @@ import type { MenuData, SavedOrder, PaymentRecord } from '../shared/domain'
 import { createPosBackend } from './backend.cjs'
 import { createWebServer } from './webServer.cjs'
 import { createRemotePos } from './remotePos.cjs'
+import { ApiError, login as mobileLogin, getMenu as mobileMenu } from '../apps/waiter-mobile/src/api'
 
 let directory: string
 let backend: ReturnType<typeof createPosBackend>
@@ -48,6 +49,80 @@ afterEach(async () => {
 })
 
 describe('restaurant browser backend', () => {
+  it('runs the native login client against the real backend for success, invalid credentials and database errors', async () => {
+    await call('setupOwner', owner)
+    const actualFetch = globalThis.fetch
+    const publicOrigin = 'https://restaurant-test.example'
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => actualFetch(String(input).replace(publicOrigin, origin), options))
+    const session = await mobileLogin(publicOrigin, 'main', owner.username, owner.password)
+    expect(session.branch.id).toBe('main')
+    expect((await mobileMenu(session)).tables.length).toBeGreaterThan(0)
+    await expect(mobileLogin(publicOrigin, 'main', owner.username, 'synthetic-invalid-password')).rejects.toMatchObject({ status: 401, kind: 'http', message: 'Invalid username or password.' })
+    const invoke = backend.invoke.bind(backend)
+    vi.spyOn(backend, 'invoke').mockImplementation((channel, senderId, input) => {
+      if (channel === 'staff:login') throw new Error('SQLITE synthetic-private-details')
+      return invoke(channel, senderId, input)
+    })
+    try { await mobileLogin(publicOrigin, 'main', owner.username, owner.password); throw new Error('Expected failure') }
+    catch (cause) { expect(cause).toBeInstanceOf(ApiError); expect(cause).toMatchObject({ status: 500, kind: 'http' }); expect((cause as Error).message).not.toContain('synthetic-private') }
+  })
+  it('returns consistent JSON for login success, invalid credentials, malformed requests and missing routes', async () => {
+    await call('setupOwner', owner)
+    const mobile = (input: unknown) => fetch(`${origin}/api/mobile/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input }) })
+    const valid = await mobile({ branchId: 'main', ...owner })
+    expect(valid.status).toBe(200)
+    expect(valid.headers.get('content-type')).toContain('application/json')
+    expect(await valid.json()).toMatchObject({ ok: true, error: null, result: { branch: { id: 'main' } } })
+    const invalid = await mobile({ branchId: 'main', username: owner.username, password: 'synthetic-invalid-password' })
+    expect(invalid.status).toBe(401)
+    expect(await invalid.json()).toEqual({ ok: false, result: null, error: 'Invalid username or password.' })
+    for (const response of [
+      await fetch(`${origin}/api`),
+      await fetch(`${origin}/api/mobile/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' }),
+      await fetch(`${origin}/api/mobile/login`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: '{}' }),
+      await fetch(`${origin}/api/mobile/login`),
+    ]) {
+      expect(response.headers.get('content-type')).toContain('application/json')
+      expect(await response.json()).toMatchObject({ ok: false, result: null, error: expect.any(String) })
+    }
+  })
+
+  it('returns safe 500/503 JSON for database and unexpected failures, without leaking error details', async () => {
+    const original = backend.invoke.bind(backend)
+    const invoke = vi.spyOn(backend, 'invoke').mockImplementation((channel, senderId, input) => {
+      if (channel === 'staff:login') throw new Error('SQLITE unavailable synthetic-secret-test-marker')
+      return original(channel, senderId, input)
+    })
+    const failed = await fetch(`${origin}/api/mobile/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: { branchId: 'main', ...owner } }) })
+    expect(failed.status).toBe(500)
+    const body = await failed.text()
+    expect(JSON.parse(body)).toMatchObject({ ok: false, result: null, error: expect.any(String) })
+    expect(body).not.toContain('synthetic-secret-test-marker')
+    invoke.mockImplementation(() => { throw new Error('synthetic-private-database-details') })
+    const health = await fetch(`${origin}/api/health`)
+    expect(health.status).toBe(503)
+    expect(await health.json()).toEqual({ ok: false, result: null, error: 'The restaurant database is unavailable. Ask your manager to check the server.' })
+  })
+
+  it('keeps exceptions during sign-out inside the JSON response boundary', async () => {
+    await call('setupOwner', owner)
+    const response = await fetch(`${origin}/api/mobile/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: { branchId: 'main', ...owner } }) })
+    const token = ((await response.json()) as { result: { token: string } }).result.token
+    const logout = vi.spyOn(backend, 'logout').mockImplementation(() => { throw new Error('synthetic-private-signout-details') })
+    const failed = await fetch(`${origin}/api/mobile/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: '{"input":null}' })
+    expect(failed.status).toBe(500)
+    expect(await failed.json()).toEqual({ ok: false, result: null, error: 'The restaurant server could not complete the request.' })
+    logout.mockRestore()
+  })
+
+  it('exposes a safe readiness probe and distinguishes a non-waiter account from invalid credentials', async () => {
+    expect(await (await fetch(`${origin}/api/health`)).json()).toEqual({ ok: true, result: { service: 'billmitra', ready: true }, error: null })
+    await call('setupOwner', owner)
+    await call('createStaff', { username: 'cashier-test', displayName: 'Cashier', role: 'cashier', password: 'synthetic-cashier-password' })
+    const response = await fetch(`${origin}/api/mobile/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: { branchId: 'main', username: 'cashier-test', password: 'synthetic-cashier-password' } }) })
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ ok: false, result: null, error: 'This staff account does not have waiter access.' })
+  })
   it('lets connected Electron use the same branch orders as the phone API', async () => {
     await call('setupOwner', owner)
     await call('createStaff', { username: 'waiter', displayName: 'Waiter', role: 'waiter', password: 'test-waiter-password-123' })

@@ -32,6 +32,7 @@ export default function App() {
   const [category, setCategory] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [connectionError, setConnectionError] = useState('')
   const [notice, setNotice] = useState('')
   const draftWrites = useRef<Promise<void>>(Promise.resolve())
   const currentLines = useRef<Line[]>([])
@@ -40,8 +41,14 @@ export default function App() {
   function replaceLines(next: Line[]) { currentLines.current = next; setLines(next) }
 
   const refresh = useCallback(async (active: Session) => {
-    try { setMenu(await getMenu(active)); setConnected(true) }
-    catch (cause) { setConnected(false); setError(describe(cause)) }
+    try { setMenu(await getMenu(active)); setConnected(true); setConnectionError('') }
+    catch (cause) {
+      setConnected(false)
+      if (cause instanceof ApiError && cause.kind === 'http' && cause.status === 401) {
+        await clearSession(); setSession(null); setMenu(null)
+        setError('Your restaurant session expired. Sign in again. Saved drafts and pending orders are kept.')
+      } else setConnectionError(describe(cause))
+    }
   }, [])
   useEffect(() => {
     void (async () => {
@@ -64,7 +71,7 @@ export default function App() {
   }, [session, refresh])
 
   async function signIn() {
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setConnectionError('')
     try {
       const active = await login(serverUrl(server), branch.trim(), username.trim(), password)
       await saveSession(active)
@@ -120,7 +127,7 @@ export default function App() {
       setNotice(job.status === 'queued' ? 'Print queued. Keep the desktop open and signed in with its printer configured.' : `Print request: ${job.status}. ${job.error}`)
       await refresh(session)
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) {
+      if (cause instanceof ApiError && cause.kind === 'http' && cause.status >= 400 && cause.status < 500) {
         await clearPendingPrint(scopeOf(session)); setPendingPrint(null); setError(describe(cause))
       } else setError(`${describe(cause)} Retry the saved print request to check its result.`)
     } finally { printing.current = false; setPrintBusy(false) }
@@ -146,7 +153,7 @@ export default function App() {
 
   return <SafeAreaView style={[styles.shell, Platform.OS === 'android' && { paddingTop: NativeStatusBar.currentHeight ?? 0 }]}><StatusBar style="dark" />
     <View style={styles.header}><View><Text style={styles.brand}>BillMitra</Text><Text style={styles.muted}>{session?.branch.name ?? 'Waiter application'}{session ? ` · ${session.staff.displayName}` : ''}</Text></View>{session && <Text style={connected ? styles.green : styles.muted}>{connected ? 'Connected' : 'Offline'}</Text>}</View>
-    {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+    {!!(error || connectionError) && <Text accessibilityRole="alert" style={styles.error}>{error || connectionError}</Text>}
     {!!notice && <Text style={styles.notice}>{notice}</Text>}
     {!session ? <ScrollView contentContainerStyle={styles.content}><Text style={styles.title}>Staff sign in</Text><Text style={styles.muted}>Ask your manager for the secure restaurant address and waiter account.</Text>
       <Text style={styles.label}>HTTPS restaurant address</Text><TextInput style={styles.input} autoCapitalize="none" autoCorrect={false} keyboardType="url" value={server} onChangeText={setServer} placeholder="https://restaurant.example.com" />

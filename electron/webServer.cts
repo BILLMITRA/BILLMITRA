@@ -38,9 +38,10 @@ export function createWebServer(options: Options) {
   }, 60_000)
   sweep.unref()
 
-  function json(response: ServerResponse, status: number, value: unknown) {
+  function json(response: ServerResponse, status: number, value: { result?: unknown; error?: string; branches?: unknown }) {
+    const contents = JSON.stringify({ ...value, ok: status >= 200 && status < 300, result: value.result ?? (value.branches ? { branches: value.branches } : null), error: value.error ?? null })
     response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-    response.end(JSON.stringify(value))
+    response.end(contents)
   }
 
   async function body(request: IncomingMessage): Promise<{ input?: unknown }> {
@@ -56,7 +57,7 @@ export function createWebServer(options: Options) {
     return parsed
   }
 
-  const server = createServer(async (request, response) => {
+  const handleRequest = async (request: IncomingMessage, response: ServerResponse) => {
     response.setHeader('X-Content-Type-Options', 'nosniff')
     response.setHeader('Referrer-Policy', 'same-origin')
     response.setHeader('X-Frame-Options', 'DENY')
@@ -69,6 +70,13 @@ export function createWebServer(options: Options) {
       return
     }
     const path = (request.url ?? '/').split('?')[0]
+    if (path === '/api/health' && request.method === 'GET') {
+      try {
+        for (const branch of branches) branch.backend.invoke(posChannels.getStaffAccessState, 0)
+        json(response, 200, { result: { service: 'billmitra', ready: true } })
+      } catch { json(response, 503, { error: 'The restaurant database is unavailable. Ask your manager to check the server.' }) }
+      return
+    }
     if (path === '/api/branches' && request.method === 'GET') {
       json(response, 200, { branches: branches.map(({ id, name }) => ({ id, name })) })
       return
@@ -78,7 +86,7 @@ export function createWebServer(options: Options) {
       if (!request.headers['content-type']?.startsWith('application/json')) { json(response, 415, { error: 'JSON is required.' }); return }
       let input: unknown
       try { input = (await body(request)).input }
-      catch { json(response, 400, { error: 'Invalid request.' }); return }
+      catch (cause) { json(response, cause instanceof Error && cause.message === 'Request too large.' ? 413 : 400, { error: 'Invalid or oversized JSON request.' }); return }
       const action = path.slice('/api/mobile/'.length)
       if (action === 'login') {
         if (mobileSessions.size >= 1000) { json(response, 503, { error: 'Too many mobile sessions.' }); return }
@@ -86,16 +94,23 @@ export function createWebServer(options: Options) {
         const branch = branches.find(item => item.id === record.branchId)
         if (!branch) { json(response, 403, { error: 'Select a configured branch.' }); return }
         const id = ++nextId
+        let phase: 'login' | 'access' = 'login'
         try {
           const staff = branch.backend.invoke(posChannels.loginStaff, id, { username: record.username, password: record.password })
           // A phone session can only enter a waiter-authorized workspace.
+          phase = 'access'
           branch.backend.invoke(posChannels.getWaiterMenu, id)
           const token = randomBytes(32).toString('hex')
           mobileSessions.set(token, { id, backend: branch.backend, branchId: branch.id, expiresAt: Date.now() + lifetime })
           json(response, 200, { result: { token, staff, branch: { id: branch.id, name: branch.name } } })
         } catch (error) {
-          branch.backend.logout(id)
-          json(response, 401, { error: error instanceof Error ? error.message : 'Sign-in failed.' })
+          try { branch.backend.logout(id) } catch { /* Cleanup must not mask the JSON error response. */ }
+          const message = error instanceof Error ? error.message : ''
+          if (error instanceof ZodError && phase === 'login') json(response, 400, { error: 'Enter a valid username and password.' })
+          else if (phase === 'login' && message === 'Invalid username or password.') json(response, 401, { error: message })
+          else if (phase === 'login' && message === 'This account is temporarily locked. Try again in five minutes.') json(response, 429, { error: message })
+          else if (phase === 'access' && /does not have permission/.test(message)) json(response, 403, { error: 'This staff account does not have waiter access.' })
+          else json(response, 500, { error: 'Restaurant sign-in is unavailable. Ask your manager to check the server and database.' })
         }
         return
       }
@@ -127,7 +142,7 @@ export function createWebServer(options: Options) {
       }
       return
     }
-    if (path.startsWith('/api/')) {
+    if (path === '/api' || path.startsWith('/api/')) {
       if (request.method !== 'POST') {
         response.setHeader('Allow', 'POST')
         json(response, 405, { error: 'Use POST for restaurant operations.' })
@@ -221,6 +236,13 @@ export function createWebServer(options: Options) {
     } catch {
       response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Page not found.')
     }
+  }
+  const server = createServer((request, response) => {
+    void handleRequest(request, response).catch(() => {
+      // Do not log request bodies, cookies, bearer tokens or internal exception messages.
+      if (!response.headersSent) json(response, 500, { error: 'The restaurant server could not complete the request.' })
+      else response.destroy()
+    })
   })
   server.requestTimeout = 15_000
   server.headersTimeout = 10_000
