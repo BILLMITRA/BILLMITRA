@@ -1,0 +1,133 @@
+<div id="billmitra-native-preview" class="viz-dotted-background">
+  <section class="bm-phone" aria-label="BillMitra native waiter application design">
+    <header class="bm-header"><div><strong>BillMitra</strong><span>Vengara · Waiter</span></div><span class="bm-preview-tag">Design preview</span></header>
+    <div class="bm-connection" data-connection></div>
+    <div class="bm-body" data-screen></div>
+    <nav class="bm-nav" aria-label="Main navigation">
+      <button type="button" class="cursor-interaction" data-page="tables">Tables</button>
+      <button type="button" class="cursor-interaction" data-page="orders">Orders</button>
+      <button type="button" class="cursor-interaction" data-page="account">Account</button>
+    </nav>
+    <div class="bm-platform">Android + iPhone · Sample menu and orders</div>
+  </section>
+</div>
+<style>
+  #billmitra-native-preview { padding: 28px 10px; }
+  #billmitra-native-preview .bm-phone { --bm-bg: light-dark(#f5f8f5,#18231d); --bm-panel: light-dark(#ffffff,#223128); --bm-text: light-dark(#213a2a,#e5f0e7); --bm-sub: light-dark(#53675a,#b5c9bb); --bm-line: light-dark(#dbe5dd,#415748); --bm-green: light-dark(#246b49,#99d9b0); --bm-on-green: light-dark(#ffffff,#102b1a); --bm-soft: light-dark(#e8f3eb,#304837); --bm-amber: light-dark(#765100,#f0cf77); width: 100%; max-width: 390px; margin: auto; background: var(--bm-bg); color: var(--bm-text); border: 1px solid var(--bm-line); border-radius: 22px; font: 16px/1.45 system-ui,sans-serif; box-shadow: 0 12px 30px #00000012; overflow-wrap: anywhere; }
+  #billmitra-native-preview .bm-phone * { box-sizing: border-box; }
+  #billmitra-native-preview .bm-header { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 22px 18px 16px; }
+  #billmitra-native-preview .bm-header strong { font-size: 23px; font-weight: 700; display: block; letter-spacing: -.6px; }
+  #billmitra-native-preview .bm-header span { font-size: 12px; color: var(--bm-sub); }
+  #billmitra-native-preview .bm-preview-tag { border: 1px solid var(--bm-line); border-radius: 20px; padding: 5px 9px; white-space: nowrap; }
+  #billmitra-native-preview .bm-connection { background: var(--bm-soft); padding: 8px 18px; color: var(--bm-green); font-size: 13px; }
+  #billmitra-native-preview .bm-body { padding: 20px 18px; min-height: 375px; }
+  #billmitra-native-preview h2 { margin: 0 0 4px; font-size: 23px; font-weight: 650; letter-spacing: -.4px; }
+  #billmitra-native-preview h3 { margin: 0; font-size: 16px; font-weight: 650; }
+  #billmitra-native-preview .bm-sub { margin: 0 0 18px; color: var(--bm-sub); font-size: 14px; }
+  #billmitra-native-preview button { font: inherit; color: var(--bm-text); background: var(--bm-panel); border: 1px solid var(--bm-line); border-radius: 12px; min-height: 48px; padding: 10px 12px; touch-action: manipulation; }
+  #billmitra-native-preview button:disabled { opacity: .55; cursor: default; }
+  #billmitra-native-preview .bm-primary { width: 100%; background: var(--bm-green); color: var(--bm-on-green); border-color: transparent; margin-top: 16px; font-weight: 600; }
+  #billmitra-native-preview .bm-back { padding: 4px 0; border: 0; background: transparent; color: var(--bm-green); min-height: 44px; margin: -10px 0 6px; }
+  #billmitra-native-preview .bm-tables { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 18px; }
+  #billmitra-native-preview .bm-table { text-align: left; min-height: 125px; padding: 16px; display: grid; align-content: start; gap: 4px; }
+  #billmitra-native-preview .bm-table strong { font-size: 24px; }
+  #billmitra-native-preview .bm-table small { font-size: 12px; color: var(--bm-sub); }
+  #billmitra-native-preview .bm-status { font-size: 12px; color: var(--bm-green); }
+  #billmitra-native-preview .bm-status[data-ready="true"] { color: var(--bm-amber); }
+  #billmitra-native-preview .bm-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 0; border-bottom: 1px solid var(--bm-line); }
+  #billmitra-native-preview .bm-menu-item small { color: var(--bm-sub); display: block; }
+  #billmitra-native-preview .bm-menu-item button { color: var(--bm-green); min-width: 60px; }
+  #billmitra-native-preview label { display: grid; gap: 6px; margin: 14px 0; font-size: 13px; color: var(--bm-sub); }
+  #billmitra-native-preview input { background: var(--bm-panel); color: var(--bm-text); border: 1px solid var(--bm-line); border-radius: 10px; width: 100%; min-width: 0; min-height: 48px; padding: 11px; font: inherit; font-size: 16px; }
+  #billmitra-native-preview .bm-line { padding: 14px 0; border-bottom: 1px solid var(--bm-line); }
+  #billmitra-native-preview .bm-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  #billmitra-native-preview .bm-stepper { display: flex; align-items: center; gap: 10px; }
+  #billmitra-native-preview .bm-stepper button { width: 48px; }
+  #billmitra-native-preview .bm-total { display: flex; justify-content: space-between; gap: 10px; margin: 18px 0 0; }
+  #billmitra-native-preview .bm-ticket { background: var(--bm-panel); border: 1px solid var(--bm-line); border-radius: 14px; padding: 15px; margin: 14px 0; }
+  #billmitra-native-preview .bm-ticket ul { padding-left: 20px; margin: 8px 0; }
+  #billmitra-native-preview .bm-ticket p { color: var(--bm-sub); font-size: 13px; margin: 6px 0; }
+  #billmitra-native-preview .bm-note { font-size: 13px; color: var(--bm-sub); margin: 14px 0; }
+  #billmitra-native-preview .bm-message { padding: 12px; background: var(--bm-soft); border-radius: 10px; color: var(--bm-green); font-size: 14px; margin-bottom: 16px; }
+  #billmitra-native-preview .bm-nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 4px; padding: 8px; background: var(--bm-panel); border-top: 1px solid var(--bm-line); }
+  #billmitra-native-preview .bm-nav button { border: 0; background: transparent; border-radius: 10px; padding: 10px 4px; font-size: 14px; }
+  #billmitra-native-preview .bm-nav button[aria-current="page"] { background: var(--bm-soft); color: var(--bm-green); font-weight: 650; }
+  #billmitra-native-preview .bm-platform { text-align: center; font-size: 11px; padding: 8px 12px 14px; color: var(--bm-sub); }
+  @media(max-width:350px) { #billmitra-native-preview { padding: 14px 0; } #billmitra-native-preview .bm-body { padding: 16px 12px; } #billmitra-native-preview .bm-header { padding: 18px 12px; } }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('billmitra-native-preview');
+  const screen = root.querySelector('[data-screen]');
+  const products = [{name:'Chicken biryani',price:180},{name:'Porotta',price:15},{name:'Fresh lime',price:40}];
+  const emptyDraft = () => products.map(() => ({quantity:0,note:''}));
+  const state = {page:'tables',table:1,query:'',online:true,drafts:[emptyDraft(),emptyDraft(),emptyDraft(),emptyDraft()],sent:[],served:false,message:''};
+  const escapeText = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const money = value => '₹' + value.toLocaleString('en-IN');
+  const draft = () => state.drafts[state.table - 1];
+  const count = lines => lines.reduce((sum,line) => sum + line.quantity,0);
+  const total = lines => lines.reduce((sum,line,index) => sum + line.quantity * products[index].price,0);
+  const button = (label,action,extra='') => `<button type="button" class="cursor-interaction" data-action="${action}" ${extra}>${label}</button>`;
+  function readSaved(saved) {
+    const data = saved?.privateContent;
+    if (!data || data.version !== 1) return;
+    if (['tables','menu','review','orders','account'].includes(data.page)) state.page = data.page;
+    if (Number.isInteger(data.table) && data.table >= 1 && data.table <= 4) state.table = data.table;
+    if (Array.isArray(data.drafts) && data.drafts.length === 4 && data.drafts.every(lines => Array.isArray(lines) && lines.length === products.length)) {
+      state.drafts = data.drafts.map(lines => lines.map(line => ({quantity:Number.isInteger(line?.quantity) ? Math.max(0,Math.min(99,line.quantity)) : 0,note:typeof line?.note === 'string' ? line.note.slice(0,200) : ''})));
+    }
+    state.served = data.served === true;
+  }
+  function save() {
+    if (window.openai?.setWidgetState) window.openai.setWidgetState({modelContent:{concept:'Native Android and iPhone waiter application',screen:state.page},privateContent:{version:1,page:state.page,table:state.table,drafts:state.drafts,served:state.served}}).catch(() => {});
+  }
+  function menuRows() {
+    const target = screen.querySelector('[data-menu-list]');
+    if (!target) return;
+    const rows = products.map((product,index) => ({product,index})).filter(({product}) => product.name.toLowerCase().includes(state.query.toLowerCase()));
+    target.innerHTML = rows.map(({product,index}) => `<div class="bm-menu-item"><div><h3>${product.name}</h3><small>${money(product.price)}</small></div>${button(draft()[index].quantity ? '+ '+draft()[index].quantity : 'Add','add',`data-item="${index}" aria-label="Add ${product.name}"`)}</div>`).join('') || '<p class="bm-note">No matching items.</p>';
+  }
+  function render() {
+    root.querySelector('[data-connection]').textContent = state.online ? '● Connected · Preview mode' : 'Offline · Drafts stay on this phone';
+    root.querySelectorAll('[data-page]').forEach(nav => { const active = nav.dataset.page === (['menu','review'].includes(state.page) ? 'tables' : state.page); if (active) nav.setAttribute('aria-current','page'); else nav.removeAttribute('aria-current'); });
+    const notice = state.message ? `<div class="bm-message" role="status">${escapeText(state.message)}</div>` : '';
+    if (state.page === 'tables') {
+      screen.innerHTML = `${notice}<h2>Your tables</h2><p class="bm-sub">Ground floor · Open a table to take an order</p><div class="bm-tables">${[1,2,3,4].map(id => {const sent = state.sent.some(ticket => ticket.table === id); const status = id === 3 ? (state.served ? 'Served' : '1 batch ready') : (id === 2 || sent ? 'Preparing' : 'Available'); return `<button type="button" class="bm-table cursor-interaction" data-action="table" data-table="${id}"><strong>T${id}</strong><small>4 seats</small><span class="bm-status" data-ready="${id===3&&!state.served}">${status}</span>${count(state.drafts[id-1]) ? `<small>${count(state.drafts[id-1])} draft items</small>` : ''}</button>`;}).join('')}</div><p class="bm-note">Ready and preparing batches can belong to the same table.</p>`;
+    } else if (state.page === 'menu') {
+      screen.innerHTML = `<button type="button" class="bm-back cursor-interaction" data-page="tables">‹ Tables</button><h2>Table ${state.table}</h2><p class="bm-sub">Add new items</p><label>Search menu<input type="search" data-search value="${escapeText(state.query)}" placeholder="Search items"></label><div data-menu-list></div><button type="button" class="bm-primary cursor-interaction" data-action="review" ${count(draft())?'':'disabled'}>Review ${count(draft())} items · ${money(total(draft()))}</button>`;
+      menuRows();
+    } else if (state.page === 'review') {
+      screen.innerHTML = `<button type="button" class="bm-back cursor-interaction" data-action="menu">‹ Add more items</button><h2>Review · Table ${state.table}</h2><p class="bm-sub">Only these new items will go to the kitchen.</p>${draft().map((line,index) => line.quantity ? `<div class="bm-line"><div class="bm-line-head"><h3>${products[index].name}</h3><div class="bm-stepper">${button('−','minus',`data-item="${index}" aria-label="Remove one ${products[index].name}"`)}<span>${line.quantity}</span>${button('+','add',`data-item="${index}" aria-label="Add one ${products[index].name}"`)}</div></div><label>Kitchen note<input data-note="${index}" maxlength="200" value="${escapeText(line.note)}" placeholder="For example, less spicy"></label></div>` : '').join('') || '<p class="bm-note">No new items. Add items from the menu.</p>'}<div class="bm-total"><span>Item subtotal</span><strong>${money(total(draft()))}</strong></div><p class="bm-note">Final taxes and bill totals are calculated by the cashier system.</p><button type="button" class="bm-primary cursor-interaction" data-action="send" ${state.online && count(draft()) ? '' : 'disabled'}>${state.online ? 'Send to kitchen' : 'Offline · draft saved'}</button>`;
+    } else if (state.page === 'orders') {
+      screen.innerHTML = `${notice}<h2>Orders</h2><p class="bm-sub">Preparation and service progress</p><article class="bm-ticket"><div class="bm-line-head"><h3>Table 3</h3><span class="bm-status" data-ready="${!state.served}">${state.served?'Served':'Ready to serve'}</span></div><p>Batch 01 · 2 Chicken biryani</p>${state.served ? button('Request bill','bill',state.online ? '' : 'disabled') : button('Mark served','served',state.online ? '' : 'disabled')}</article><article class="bm-ticket"><h3>Table 2 · Preparing</h3><p>Batch 01 · 1 Chicken biryani, 2 Porotta</p></article>${state.sent.map(ticket => `<article class="bm-ticket"><h3>Table ${ticket.table} · Sent</h3><ul>${ticket.lines.map((line,index) => line.quantity ? `<li>${line.quantity} ${products[index].name}${line.note ? ' · '+escapeText(line.note) : ''}</li>` : '').join('')}</ul><p>Accepted in this preview only</p></article>`).join('')}`;
+    } else {
+      screen.innerHTML = '<h2>Account</h2><p class="bm-sub">Vengara · Waiter</p><div class="bm-ticket"><h3>BillMitra Waiter</h3><p>Android and iPhone application</p><p>Drafts belong to your staff account and branch.</p></div><p class="bm-note">This interactive design uses sample data. No restaurant order or payment is created.</p>';
+    }
+  }
+  root.addEventListener('click', event => {
+    const target = event.target.closest('button');
+    if (!target || target.disabled) return;
+    state.message = '';
+    if (target.dataset.page) state.page = target.dataset.page;
+    const action = target.dataset.action;
+    const index = Number(target.dataset.item);
+    if (action === 'table') { state.table=Number(target.dataset.table); state.query=''; state.page='menu'; }
+    if (action === 'add') draft()[index].quantity=Math.min(99,draft()[index].quantity+1);
+    if (action === 'minus') draft()[index].quantity=Math.max(0,draft()[index].quantity-1);
+    if (action === 'review') state.page='review';
+    if (action === 'menu') state.page='menu';
+    if (action === 'send' && state.online && count(draft())) { state.sent.push({table:state.table,lines:draft().map(line=>({...line}))}); state.drafts[state.table-1]=emptyDraft(); state.page='orders'; state.message='Preview: new items accepted by the kitchen.'; }
+    if (action === 'served' && state.online) { state.served=true; state.message='Preview: Table 3 batch marked served.'; }
+    if (action === 'bill' && state.online) state.message='Preview: bill request sent to the cashier. Payment remains with the cashier.';
+    render(); save();
+  });
+  root.addEventListener('input', event => {
+    if (event.target.matches('[data-search]')) { state.query=event.target.value; menuRows(); }
+    if (event.target.matches('[data-note]')) { draft()[Number(event.target.dataset.note)].note=event.target.value.slice(0,200); save(); }
+  });
+  readSaved(window.openai?.widgetState);
+  render();
+  window.addEventListener('openai:set_globals', event => { if (event.detail?.globals?.widgetState) { readSaved(event.detail.globals.widgetState); render(); } });
+  if (globalThis.Tweak) { const tweak = new Tweak({container:root.querySelector('.bm-phone'),onChange:render}); tweak.addToggle(state,'online',{label:'Connected to restaurant'}); }
+})();
+</script>
