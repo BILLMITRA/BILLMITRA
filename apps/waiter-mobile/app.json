@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "BillMitra Waiter",
+    "slug": "billmitra-waiter",
+    "version": "1.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.billmitra.waiter"
+    },
+    "android": {
+      "versionCode": 3,
+      "package": "com.billmitra.waiter",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "8636388f-f6c8-4809-b678-2a8a87bc9bc1"
+      }
+    },
+    "owner": "billmitras-team"
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Armchair, ArrowDownRight, ArrowLeft, ArrowUpRight, CalendarClock, Check, ChevronDown, Coffee,
   Ban, CreditCard, Flame, History, Minus, Plus, Printer, Search, ShieldCheck, ShoppingBag,
@@ -30,6 +30,9 @@ import { DeliveryActionDialog } from '../features/delivery/DeliveryActionDialog'
 import { DeliveryCustomerDialog } from '../features/delivery/DeliveryCustomerDialog'
 import { StaffAccessScreen } from '../features/staff/StaffAccessScreen'
 import { StaffManagementDialog } from '../features/staff/StaffManagementDialog'
+import { DesktopPrinters } from '../features/printing/DesktopPrinters'
+import { TablePrintDialog } from '../features/printing/TablePrintDialog'
+import '../features/printing/printing.css'
 import { RestaurantManagement } from '../features/management/RestaurantManagement'
 import { PaymentLedgerDialog } from '../features/management/PaymentLedgerDialog'
 import { WaiterScreen } from '../features/management/WaiterScreen'
@@ -90,6 +93,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [discountInput, setDiscountInput] = useState('0')
   const [showInvoice, setShowInvoice] = useState(false)
   const [showKitchenTicket, setShowKitchenTicket] = useState(false)
+  const [tablePrint, setTablePrint] = useState<{ table: RestaurantTable; kind: 'bill' | 'kot' } | null>(null)
+  const closeTablePrint = useCallback(() => setTablePrint(null), [])
   const [kitchenTicketDuplicate, setKitchenTicketDuplicate] = useState(false)
   const [showDeliveryCustomerDialog, setShowDeliveryCustomerDialog] = useState(false)
   const [customerName, setCustomerName] = useState('')
@@ -102,8 +107,10 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [failedSubmission, setFailedSubmission] = useState<CreateOrderInput | null>(null)
   const [savedMessage, setSavedMessage] = useState('')
   const [clock, setClock] = useState(() => new Date())
+  const [liveError, setLiveError] = useState('')
   const [deliveryTimerNow, setDeliveryTimerNow] = useState(() => Date.now())
   const staff = staffAccess?.staff ?? null
+  const connected = !window.pos || window.pos.connectionMode === 'connected'
   const canApplyDiscount = Boolean(staff && staffHasPermission(staff.role, 'discount:apply'))
   const canManageStaff = Boolean(staff && staffHasPermission(staff.role, 'staff:manage'))
   const canManageSettings = Boolean(staff && staffHasPermission(staff.role, 'settings:manage'))
@@ -161,6 +168,25 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   }, [staff])
 
   useEffect(() => {
+    if (!connected || !staff || !staffHasPermission(staff.role, 'pos:access')) return
+    let active = true
+    let inFlight = false
+    const refresh = async () => {
+      if (inFlight || document.visibilityState === 'hidden') return
+      inFlight = true
+      try {
+        const data = await loadMenu()
+        if (active) { setMenu(data); setLiveError('') }
+      } catch (cause) {
+        if (active) setLiveError(cause instanceof Error ? cause.message : 'Restaurant connection lost.')
+      } finally { inFlight = false }
+    }
+    const timer = window.setInterval(() => void refresh(), 5000)
+    window.addEventListener('focus', refresh)
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', refresh) }
+  }, [connected, staff])
+
+  useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
@@ -175,10 +201,14 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   }, [])
 
   useEffect(() => {
-    if (serviceSection !== 'delivery' || deliveryOrderOpen) return
-    const timer = window.setInterval(() => setDeliveryTimerNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [deliveryOrderOpen, serviceSection])
+    if (!staff) return
+    if ((serviceSection !== 'delivery' || deliveryOrderOpen) && (serviceSection !== 'tables' || tableViewOpen)) return
+    const tick = () => setDeliveryTimerNow(Date.now())
+    const timer = window.setInterval(tick, 1000)
+    window.addEventListener('focus', tick)
+    document.addEventListener('visibilitychange', tick)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick) }
+  }, [deliveryOrderOpen, serviceSection, tableViewOpen, staff])
 
   const floors = useMemo(() => [...new Set(menu?.tables.map((table) => table.floor) ?? [])], [menu])
   const visibleProducts = useMemo(() => {
@@ -897,9 +927,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           </button>
         ))}
         <div className="sidebar-spacer" />
-        <div className={`sidebar-status ${menu ? '' : 'disconnected'}`}><span className={`online-dot ${menu ? '' : 'offline'}`} /><span><b>{menu ? 'Local database active' : 'Local data unavailable'}</b><small>{menu ? 'Offline-ready · This device' : 'Check the local database connection'}</small></span></div>
+        <div className={`sidebar-status ${menu && !liveError ? '' : 'disconnected'}`}><span className={`online-dot ${menu && !liveError ? '' : 'offline'}`} /><span><b>{connected ? (liveError ? 'Connection lost' : 'Shared branch server') : (menu ? 'Local database active' : 'Local data unavailable')}</b><small>{connected ? (liveError ? 'Check the restaurant server connection' : 'Same branch as waiter phones') : (menu ? 'Offline-ready · This device' : 'Check the local database connection')}</small></span></div>
         <button className="profile" onClick={() => void handleStaffLogout()} title="Sign out">
-          <span className="avatar">{staff.displayName.slice(0, 2).toUpperCase()}</span><span><b>{staff.displayName}</b><small>{staff.role} · Local account</small></span><LogOut size={14} />
+          <span className="avatar">{staff.displayName.slice(0, 2).toUpperCase()}</span><span><b>{staff.displayName}</b><small>{staff.role} · {connected ? 'Connected account' : 'Local account'}</small></span><LogOut size={14} />
         </button>
       </aside>
 
@@ -907,10 +937,11 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
         <header className="topbar">
           <div className="breadcrumb"><span>Restaurant</span><span>/</span><b>{serviceSection === 'tables' ? tableViewOpen && selectedTableData ? `Table ${selectedTableData.name}` : 'All tables' : serviceSection === 'parcel' ? 'Takeaway' : 'Home delivery'}</b></div>
           <div className="topbar-actions">
+            <DesktopPrinters />
             {staffHasPermission(staff.role, 'waiter:operate') && <button className="staff-management-button" onClick={() => setShowWaiter(true)}>Waiter</button>}
             {(staffHasPermission(staff.role, 'menu:manage') || staffHasPermission(staff.role, 'reports:view')) && <button className="staff-management-button" onClick={() => setShowManagement(true)}>Management</button>}
             {canManageStaff && <button className="staff-management-button" onClick={() => setShowStaffManagement(true)}><Users size={14} />Staff</button>}
-            <div className="live-indicator"><span className="online-dot" /> LOCAL MODE</div>
+            <div className="live-indicator" title={liveError || undefined}><span className={`online-dot${liveError ? ' offline' : ''}`} /> {connected ? liveError ? 'CONNECTION LOST' : 'CONNECTED · 5S REFRESH' : 'LOCAL MODE'}</div>
             <span className="top-divider" />
             <div className="date-time"><b>{clock.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</b><span>{clock.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</span></div>
             <button className="avatar top-avatar" aria-label={`Sign out ${staff.displayName}`} title={`Sign out ${staff.displayName}`} onClick={() => void handleStaffLogout()}>{staff.displayName.slice(0, 2).toUpperCase()}</button>
@@ -942,7 +973,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                   <div className="summary-metric"><span className="summary-icon guests"><Users size={17} /></span><span><strong>{visibleTables.reduce((sum, table) => sum + table.capacity, 0)}</strong><small>Total seats</small></span></div>
                   <div className="summary-action"><span>Updated just now</span><span className="refresh-mark">↻</span></div>
                 </div>
-                <div className="section-heading"><h2>Tables <span className="muted-count">{visibleTables.length}</span></h2><div className="table-legend"><span><i className="legend-dot open" />Available</span><span><i className="legend-dot busy" />In service</span></div></div>
+                <div className="section-heading"><h2>Tables <span className="muted-count">{visibleTables.length}</span></h2><div className="table-legend"><span><i className="legend-dot open" />Available</span><span><i className="legend-dot timer-open" />Under 1 hour</span><span><i className="legend-dot timer-overdue" />1 hour or more</span></div></div>
                 <div className="table-grid">
                   {visibleTables.map((table) => {
                     return (
@@ -951,6 +982,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                         table={table}
                         selected={selectedTable === table.id}
                         onSelect={chooseTable}
+                        now={deliveryTimerNow}
+                        onPrint={window.desktopPrinting ? (selected, kind) => setTablePrint({ table: selected, kind }) : undefined}
                       />
                     )
                   })}
@@ -1041,7 +1074,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               })}
             </div>
             {error && <div className="alert error-alert"><span>{error}</span>{failedSubmission && <button onClick={() => void submitOrder(failedSubmission)}>Retry same order</button>}</div>}
-            {savedMessage && <div className="alert success-alert"><Check size={16} />{savedMessage}<span className="sync-pill">Saved locally</span></div>}
+            {savedMessage && <div className="alert success-alert"><Check size={16} />{savedMessage}<span className="sync-pill">{connected ? 'Saved to branch server' : 'Saved locally'}</span></div>}
             <div className="product-grid">
               {visibleProducts.map((product, index) => (
                 <button key={product.id} className={`product-card product-tone-${index % 5}`} onClick={() => addProduct(product)} disabled={Boolean(failedSubmission) || submitting || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}>
@@ -1060,7 +1093,10 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             <div className="order-panel-heading">
               <div><div className="eyebrow">CURRENT BILL</div><h2>{activeOrder ? `Order ${formatOrderReference(activeOrder)}` : orderType === 'delivery' ? 'New delivery' : orderType === 'parcel' ? 'New takeaway' : 'New order'}</h2></div>
               <div className="bill-header-actions">
-                {activeOrder && <button className="bill-action-button print-bill-button" onClick={() => setShowInvoice(true)}><Printer size={15} />Print bill</button>}
+                {activeOrder && <button className="bill-action-button print-bill-button" onClick={() => {
+                  if (window.desktopPrinting && selectedTableData?.orderId === activeOrder.id && activeOrder.status !== 'paid' && activeOrder.status !== 'voided') setTablePrint({ table: selectedTableData, kind: 'bill' })
+                  else setShowInvoice(true)
+                }}><Printer size={15} />Print bill</button>}
                 {activeOrder && activeOrder.status !== 'voided' && <button className="bill-action-button" disabled={cart.length > 0 || discountChanged || paymentSubmitting || Boolean(failedPayment)} onClick={() => setShowPaymentLedger(true)}>Split payment / refunds</button>}
                 <button className="bill-action-button clear-draft-button" onClick={clearDraft} disabled={!canClearDraft}><Trash2 size={15} />Clear draft</button>
               </div>
@@ -1140,8 +1176,11 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               </button>
               {!hasManagerPin && canManageSettings && <button className="right-action security-setup" onClick={() => setManagerDialogMode('setup')}><ShieldCheck size={15} />Set manager PIN</button>}
               <button className="right-action unavailable" disabled title="Staff calling is available when the waiter module is implemented">Call staff</button>
-              <button className="right-action" onClick={() => void openDuplicateKot()} disabled={!activeOrder || cart.length > 0 || activeOrder.status === 'paid' || activeOrder.status === 'voided'} title={cart.length > 0 ? 'Save added items before duplicating the kitchen ticket' : 'Print a duplicate kitchen ticket'}>
-                <Printer size={15} />Duplicate KOT
+              <button className="right-action" onClick={() => {
+                if (window.desktopPrinting && activeOrder && selectedTableData?.orderId === activeOrder.id) setTablePrint({ table: selectedTableData, kind: 'kot' })
+                else void openDuplicateKot()
+              }} disabled={!activeOrder || cart.length > 0 || activeOrder.status === 'paid' || activeOrder.status === 'voided'} title={cart.length > 0 ? 'Save added items before printing a kitchen ticket' : 'Choose a saved kitchen batch to print'}>
+                <Printer size={15} />{window.desktopPrinting && activeOrder?.type === 'dine_in' ? 'Print KOT' : 'Duplicate KOT'}
               </button>
               {activeOrder?.status === 'voided' && <span className="void-reason-note">Reason: {activeOrder.voidReason}</span>}
             </div>
@@ -1206,7 +1245,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               {submitting ? <><span className="button-spinner" />Saving to this device…</> : failedSubmission ? <><ArrowUpRight size={17} />Retry saving invoice</> : activeOrder && cart.length === 0 ? <><Check size={17} />Update invoice</> : activeOrder ? <><Plus size={17} />Done · Save changes</> : <><Check size={17} />Done · Save bill</>}
               {!submitting && !failedSubmission && <span>{formatMoney(totalPaise)}</span>}
             </button>
-            <div className="save-note"><span className="online-dot" /> Saved locally on this device <span>·</span> No cloud sync</div>
+            <div className="save-note"><span className="online-dot" /> {connected ? 'Shared branch data' : 'Saved locally on this device'} <span>·</span> {connected ? 'Desktop and waiter phones' : 'No cloud sync'}</div>
             {activeOrder?.status === 'voided' ? (
               <div className="payment-hint voided-payment-hint"><Ban size={15} />Voided bill · payment is disabled.</div>
             ) : activeOrder ? (
@@ -1318,6 +1357,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           onSelect={selectHistoricalBill}
         />
       )}
+      {tablePrint && <TablePrintDialog table={tablePrint.table} kind={tablePrint.kind} onClose={closeTablePrint} />}
       {showStaffManagement && canManageStaff && <StaffManagementDialog onClose={() => setShowStaffManagement(false)} />}
       {showPaymentLedger && activeOrder && <PaymentLedgerDialog orderId={activeOrder.id} canRefund={staffHasPermission(staff.role, 'payments:refund')} onClose={() => {
         setShowPaymentLedger(false)

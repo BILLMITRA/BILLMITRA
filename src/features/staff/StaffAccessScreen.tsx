@@ -103,7 +103,7 @@ export function StaffAccessScreen({ needsOwnerSetup, onAuthenticated }: StaffAcc
             {submitting ? 'Please wait…' : needsOwnerSetup ? 'Create owner account' : 'Sign in'}
           </button>
         </form>
-        <footer>Local staff access · This device only</footer>
+        <footer>{window.pos?.connectionMode === 'local' ? 'Local staff access · This device only' : 'Connected restaurant staff access'}</footer>
       </section>
     </main>
   )

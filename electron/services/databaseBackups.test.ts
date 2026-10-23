@@ -46,7 +46,7 @@ it('does not resend historical paid orders to the kitchen when upgrading an olde
   backend!.invoke('pos:record-payment', 1, { requestId: randomUUID(), orderId: paid.id, method: 'cash' })
   backend!.close(); backend = undefined
   const db = new DatabaseSync(path)
-  db.exec('DROP TABLE kitchen_tickets; DELETE FROM schema_migrations WHERE version = 15;'); db.close()
+  db.exec('DROP TABLE print_jobs; DROP TABLE kitchen_tickets; DELETE FROM schema_migrations WHERE version >= 15;'); db.close()
   backend = createPosBackend(path); backend.invoke('staff:login', 1, owner)
   const queue = backend.invoke('kitchen:queue', 1) as { orders: { id: string }[] }
   expect(queue.orders.map(order => order.id)).toEqual([unpaid.id])

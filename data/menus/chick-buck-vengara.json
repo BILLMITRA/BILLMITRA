@@ -1,0 +1,175 @@
+{
+  "restaurant": "Chick Buck",
+  "branchId": "main",
+  "sourceFile": "laaaaaaaaaaaaadt.pdf",
+  "sourcePages": 10,
+  "currency": "INR",
+  "additionalTaxRateBps": 0,
+  "pricingNote": "Prices copied as printed. Food pages state GST included. No additional tax is added; a statutory GST breakdown is not configured by this import.",
+  "notes": ["Cover and contact pages contain no sale items.", "Lime Soda (Sweet / Salt) is represented by two separately selectable items at the same printed price.", "Ketchup add-on is printed as Rs 1 on page 2.", "Pista | Badam | Cashew is retained as the single combined line printed under Dry Fruit Shake."],
+  "categories": [
+    {"name":"CB Combos","page":2,"reuseDemoCategory":{"id":"mains","name":"Mains"},"items":[
+      {"name":"M1 Chicken Combo (Quarter)","priceRupees":169,"description":"2 pcs chicken, 1 khubz, French fries, mayo and ketchup."},
+      {"name":"M2 Chicken Combo (Half)","priceRupees":329,"description":"4 pcs chicken, 2 khubz, French fries, mayo and ketchup."},
+      {"name":"M3 Chicken Combo (Full)","priceRupees":649,"description":"8 pcs chicken, 4 khubz, French fries, mayo and ketchup."},
+      {"name":"M4 Chicken Combo (2 Full)","priceRupees":1279,"description":"16 pcs chicken, 8 khubz, French fries, mayo and ketchup."},
+      {"name":"CB Combo (3 Full)","priceRupees":1919,"description":"24 pcs chicken, 12 khubz, French fries, mayo and ketchup."}
+    ]},
+    {"name":"Burgers","page":3,"reuseDemoCategory":{"id":"breads","name":"Breads"},"items":[
+      {"name":"CB Special Veg Patty Burger","priceRupees":79},
+      {"name":"CB Special Small Patty Burger","priceRupees":89},
+      {"name":"CB Special Big Patty Burger","priceRupees":149},
+      {"name":"CB Special Small Chicken Burger","priceRupees":79,"description":"Signature."},
+      {"name":"CB Special Big Chicken Burger","priceRupees":139,"description":"Signature."}
+    ]},
+    {"name":"Sandwiches","page":3,"items":[
+      {"name":"CB Special Sandwich","priceRupees":89,"description":"Signature."},
+      {"name":"CB Special Tortilla Sandwich","priceRupees":139,"description":"Signature.","page":5}
+    ]},
+    {"name":"Snack Combos","page":4,"reuseDemoCategory":{"id":"starters","name":"Starters"},"items":[
+      {"name":"C1 Nuggets Combo (8 pcs)","priceRupees":179,"description":"8 pcs nuggets, French fries, mayo and ketchup."},
+      {"name":"C2 Special Boneless Strips Combo (6 pcs)","priceRupees":169,"description":"Signature. 6 pcs boneless strips, 1 khubz, French fries, mayo and ketchup."},
+      {"name":"C3 Special Boneless Strips Combo (12 pcs)","priceRupees":329,"description":"Signature. 12 pcs boneless strips, 2 khubz, French fries, mayo and ketchup."},
+      {"name":"C4 Chicken Finger Combo (8 pcs)","priceRupees":179,"description":"8 pcs chicken finger, French fries, mayo and ketchup."},
+      {"name":"C5 Crab Lollipop Combo (5 pcs)","priceRupees":199,"description":"5 pcs crab lollipop, French fries, mayo and ketchup."},
+      {"name":"C6 Chicken Popcorn Combo","priceRupees":179,"description":"Chicken popcorn, French fries, mayo and ketchup.","page":5},
+      {"name":"C7 Onion Rings Combo (6 pcs)","priceRupees":179,"description":"6 pcs onion rings, French fries, mayo and ketchup.","page":5}
+    ]},
+    {"name":"Fries","page":5,"items":[
+      {"name":"French Fries","priceRupees":99},
+      {"name":"Chicken Loaded Fries","priceRupees":219,"description":"Signature."}
+    ]},
+    {"name":"Add-ons","page":2,"items":[
+      {"name":"Khubz","priceRupees":10},
+      {"name":"Bun","priceRupees":10},
+      {"name":"Mayonnaise","priceRupees":10},
+      {"name":"Spicy Mayonnaise","priceRupees":10},
+      {"name":"Ketchup","priceRupees":1}
+    ]},
+    {"name":"Lime","page":6,"reuseDemoCategory":{"id":"drinks","name":"Drinks"},"items":[
+      {"name":"Lime","priceRupees":20},
+      {"name":"Mint Lime","priceRupees":25},
+      {"name":"Pineapple Lime","priceRupees":30},
+      {"name":"Grape Lime","priceRupees":30},
+      {"name":"Mango Lime","priceRupees":30},
+      {"name":"Ginger Lime","priceRupees":30},
+      {"name":"Pothina Ginger Lime","priceRupees":30}
+    ]},
+    {"name":"Fresh Juice","page":6,"items":[
+      {"name":"Watermelon Fresh Juice","priceRupees":60},
+      {"name":"Papaya Fresh Juice","priceRupees":70},
+      {"name":"Pineapple Fresh Juice","priceRupees":70},
+      {"name":"Grape Fresh Juice","priceRupees":70},
+      {"name":"Orange Fresh Juice","priceRupees":70},
+      {"name":"Mosambi Fresh Juice","priceRupees":70},
+      {"name":"Carrot Fresh Juice","priceRupees":70},
+      {"name":"Mango Fresh Juice","priceRupees":70},
+      {"name":"Beetroot Fresh Juice","priceRupees":70},
+      {"name":"Mix Fruit Fresh Juice","priceRupees":70}
+    ]},
+    {"name":"Shakes","page":6,"items":[
+      {"name":"Chikku Shake","priceRupees":80},
+      {"name":"Papaya Shake","priceRupees":80},
+      {"name":"Sharjah Shake","priceRupees":80},
+      {"name":"Grape Shake","priceRupees":80},
+      {"name":"Mango Shake","priceRupees":80},
+      {"name":"Apple Shake","priceRupees":80},
+      {"name":"Carrot Shake","priceRupees":80},
+      {"name":"Cocktail King Shake","priceRupees":80},
+      {"name":"Strawberry Shake","priceRupees":90},
+      {"name":"Anar Shake","priceRupees":100},
+      {"name":"Tender Coconut Shake","priceRupees":100},
+      {"name":"Butter Fruit Shake","priceRupees":100}
+    ]},
+    {"name":"Mojito","page":7,"items":[
+      {"name":"Passion Fruit Mojito","priceRupees":100},
+      {"name":"Green Apple Mojito","priceRupees":100},
+      {"name":"Orange Mojito","priceRupees":100},
+      {"name":"Blue Mojito","priceRupees":100},
+      {"name":"Strawberry Mojito","priceRupees":100}
+    ]},
+    {"name":"Kulikki Sarbath","page":7,"items":[
+      {"name":"Green Mango Kulikki Sarbath","priceRupees":60},
+      {"name":"Passion Fruit Kulikki Sarbath","priceRupees":60},
+      {"name":"Mosambi Kulikki Sarbath","priceRupees":60},
+      {"name":"Orange Kulikki Sarbath","priceRupees":60},
+      {"name":"Pineapple Kulikki Sarbath","priceRupees":60},
+      {"name":"Boost Kulikki Sarbath","priceRupees":60}
+    ]},
+    {"name":"Soda","page":7,"items":[
+      {"name":"Lime Soda (Sweet)","priceRupees":25},
+      {"name":"Lime Soda (Salt)","priceRupees":25},
+      {"name":"Chilli Soda","priceRupees":30},
+      {"name":"Nannari Soda","priceRupees":30},
+      {"name":"Pineapple Soda","priceRupees":50},
+      {"name":"Grape Soda","priceRupees":50},
+      {"name":"Orange Soda","priceRupees":50},
+      {"name":"Blue Lime Soda","priceRupees":50},
+      {"name":"Green Apple Soda","priceRupees":50},
+      {"name":"Green Mango Soda","priceRupees":60}
+    ]},
+    {"name":"Healthy Juice","page":7,"items":[
+      {"name":"ABC Juice","priceRupees":80,"description":"Apple, beetroot and carrot."},
+      {"name":"ACP Juice","priceRupees":80,"description":"Apple, carrot and pineapple."},
+      {"name":"Orange Carrot Juice","priceRupees":80},
+      {"name":"Pineapple Carrot Juice","priceRupees":80},
+      {"name":"OCA Juice","priceRupees":80,"description":"Orange, carrot and apple."}
+    ]},
+    {"name":"Pure Fruit Juice","page":8,"items":[
+      {"name":"Carrot Pure Fruit Juice","priceRupees":100},
+      {"name":"Papaya Pure Fruit Juice","priceRupees":100},
+      {"name":"Mosambi Pure Fruit Juice","priceRupees":120},
+      {"name":"Anar Pure Fruit Juice","priceRupees":120},
+      {"name":"Orange Pure Fruit Juice","priceRupees":120}
+    ]},
+    {"name":"Chocolate Shakes","page":8,"items":[
+      {"name":"Five Star Shake","priceRupees":80},
+      {"name":"Chocolate Shake","priceRupees":80},
+      {"name":"Snickers Shake","priceRupees":80},
+      {"name":"Kitkat Shake","priceRupees":80},
+      {"name":"Oreo Shake","priceRupees":80},
+      {"name":"Oreo Kitkat Shake","priceRupees":80},
+      {"name":"Oreo Snickers Shake","priceRupees":80},
+      {"name":"Cold Coffee","priceRupees":80},
+      {"name":"Cold Boost","priceRupees":80},
+      {"name":"Cold Horlicks","priceRupees":80},
+      {"name":"Choco Pie Shake","priceRupees":80},
+      {"name":"Monster Shake","priceRupees":100}
+    ]},
+    {"name":"Ice Cream Shakes","page":8,"items":[
+      {"name":"Butterscotch Ice Cream Shake","priceRupees":90},
+      {"name":"Pista Ice Cream Shake","priceRupees":90},
+      {"name":"Vanilla Ice Cream Shake","priceRupees":90},
+      {"name":"Strawberry Ice Cream Shake","priceRupees":90},
+      {"name":"Mango Ice Cream Shake","priceRupees":90},
+      {"name":"Chocolate Ice Cream Shake","priceRupees":90}
+    ]},
+    {"name":"Falooda","page":9,"reuseDemoCategory":{"id":"desserts","name":"Desserts"},"items":[
+      {"name":"Fruit Salad","priceRupees":70},
+      {"name":"Fruit Custard","priceRupees":70},
+      {"name":"Falooda","priceRupees":90},
+      {"name":"Royal Falooda","priceRupees":100},
+      {"name":"SP Falooda","priceRupees":110},
+      {"name":"Arabian Falooda","priceRupees":120},
+      {"name":"Dry Fruits Falooda","priceRupees":120}
+    ]},
+    {"name":"Dry Fruit Shakes","page":9,"items":[
+      {"name":"Khajur (Dates) Shake","priceRupees":100},
+      {"name":"Badam Shake","priceRupees":100},
+      {"name":"Cashew Shake","priceRupees":100},
+      {"name":"Almond Cashew Shake","priceRupees":100},
+      {"name":"Pista | Badam | Cashew Shake","priceRupees":100},
+      {"name":"Mixed Dry Fruit Shake","priceRupees":100}
+    ]},
+    {"name":"Ice Creams","page":9,"items":[
+      {"name":"Mango Ice Cream","priceRupees":60},
+      {"name":"Chocolate Ice Cream","priceRupees":60},
+      {"name":"Vanilla Ice Cream","priceRupees":60},
+      {"name":"Strawberry Ice Cream","priceRupees":60},
+      {"name":"Butterscotch Ice Cream","priceRupees":60},
+      {"name":"Pista Ice Cream","priceRupees":60},
+      {"name":"Tender Ice Cream","priceRupees":70},
+      {"name":"Delight Ice Cream","priceRupees":70}
+    ]}
+  ]
+}

@@ -2,7 +2,7 @@
 
 ## Product direction
 
-The requested product supports multiple branches from the first unified release, shared online data, and offline desktop billing. No hosting account is available yet. The browser application now supports separately configured branch databases and staff sessions. The desktop retains its local database. Desktop/cloud synchronization and actual internet deployment are not implemented.
+The requested product supports multiple branches from the first unified release, shared online data, and offline desktop billing. No hosting account is available yet. The browser application supports separately configured branch databases and staff sessions. The desktop now has an explicit connected mode against the same branch server; its original local database stays separate. A separate Android/iPhone waiter application has initial native screens and API integration. Desktop/cloud offline synchronization and actual internet deployment are not implemented.
 
 ## Implemented foundation
 

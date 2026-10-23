@@ -1,6 +1,8 @@
 # BillMitra native waiter application plan
 
-Planning date: 23 October 2026. Confirmed: an installed application for both Android and iPhone. The supplied MySQL screenshot is treated as a proposed central-database direction, not authorization to replace existing data. This is a proposed design and implementation plan, not a list of completed features. The first pilot branch is Vengara (`main`). Keep that branch ID stable.
+Planning date: 23 October 2026. Confirmed: an installed application for both Android and iPhone. The supplied MySQL screenshot is treated as a proposed central-database direction, not authorization to replace existing data. The first pilot branch is Vengara (`main`). Keep that branch ID stable.
+
+Implementation update: `apps/waiter-mobile` now contains native login, floor tabs, menu quantity controls, review, on-device drafts, pending-order retry, occupied-table timers, and desktop-mediated bill/KOT requests. The backend has token-authenticated mobile routes and a durable print queue, and Electron has connected mode and configurable Windows printer routes. See [waiter-printing.md](waiter-printing.md) for setup and validation. The remaining sections describe the target release; ticket progress, service acknowledgements, MySQL migration, offline desktop synchronization, signed installers and permanent hosting are still outstanding.
 
 ## Product direction
 

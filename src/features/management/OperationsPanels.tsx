@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { CashSummary, InventoryItem, KitchenQueue, StockMovement } from '../../../shared/restaurant'
 import { formatOrderReference } from '../../../shared/domain'
 import { formatMoney } from '../../../shared/billing'
+import { DesktopPrinters } from '../printing/DesktopPrinters'
+import '../printing/printing.css'
 import { closeCash, getCashSummary, getKitchenQueue, getStockHistory, listInventory, moveStock, saveInventoryItem, updateKitchenStatus } from '../../services/pos'
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'The operation failed.'
@@ -83,7 +85,7 @@ export function KitchenPanel() {
     setBusy(true); setError('')
     try { await updateKitchenStatus({ orderId, ticketId, status }); setQueue(await getKitchenQueue()) } catch (cause) { setError(message(cause)) } finally { setBusy(false) }
   }
-  return <><p>Live preparation queue  |  refreshes every five seconds. Payment and preparation are tracked separately.</p>{error && <p role="alert" className="management-error">{error}</p>}
+  return <><DesktopPrinters /><p>Live preparation queue  |  refreshes every five seconds. Payment and preparation are tracked separately.</p>{error && <p role="alert" className="management-error">{error}</p>}
     {queue.orders.length === 0 && <p>No orders waiting in the kitchen.</p>}
     <div className="management-kitchen-grid">{queue.orders.map(order => <article className="management-card" key={order.ticketId}><h2>{formatOrderReference(order)}  |  {order.type.replace('_', ' ')}</h2><p>{order.createdAt} UTC  |  {order.status}</p>{order.tableId && <p>Table: {order.tableId}</p>}<ul>{order.items.map(item => <li key={item.id}><b>{item.quantity} x {item.productName}</b>{item.note && <p>{item.note}</p>}</li>)}</ul><button disabled={busy} onClick={() => void advance(order.id, order.ticketId, order.status === 'ordering' ? 'preparing' : order.status === 'preparing' ? 'ready' : 'payment_pending')}>{order.status === 'ordering' ? 'Start preparation' : order.status === 'preparing' ? 'Mark ready' : 'Mark handed over'}</button></article>)}</div>
   </>

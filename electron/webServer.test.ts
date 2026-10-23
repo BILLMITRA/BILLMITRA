@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import type { MenuData, SavedOrder, PaymentRecord } from '../shared/domain'
 import { createPosBackend } from './backend.cjs'
 import { createWebServer } from './webServer.cjs'
+import { createRemotePos } from './remotePos.cjs'
 
 let directory: string
 let backend: ReturnType<typeof createPosBackend>
@@ -47,6 +48,71 @@ afterEach(async () => {
 })
 
 describe('restaurant browser backend', () => {
+  it('lets connected Electron use the same branch orders as the phone API', async () => {
+    await call('setupOwner', owner)
+    await call('createStaff', { username: 'waiter', displayName: 'Waiter', role: 'waiter', password: 'test-waiter-password-123' })
+    const desktop = createRemotePos(origin, 'main')
+    try {
+      await desktop.invoke('staff:login', 501, { username: 'restaurant-owner', password: owner.password })
+      const menu = await desktop.invoke('pos:load-menu', 501) as MenuData
+      const saved = await desktop.invoke('pos:create-order', 501, {
+        requestId: randomUUID(), type: 'dine_in', tableId: menu.tables[0].id,
+        customerName: '', deliveryAddress: '', discount: null,
+        items: [{ productId: menu.products[0].id, quantity: 1, note: '' }],
+      }) as SavedOrder
+      const login = await fetch(`${origin}/api/mobile/login`, { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: { branchId: 'main', username: 'waiter', password: 'test-waiter-password-123' } }),
+      })
+      const token = ((await login.json()) as { result: { token: string } }).result.token
+      const response = await fetch(`${origin}/api/mobile/menu`, { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ input: null }),
+      })
+      const phoneMenu = ((await response.json()) as { result: MenuData }).result
+      expect(phoneMenu.activeOrders.some(order => order.id === saved.id)).toBe(true)
+    } finally { desktop.close() }
+  })
+
+  it('authenticates a phone waiter, limits its operations, and revokes sign-out', async () => {
+    await call('setupOwner', owner)
+    await call('createStaff', { username: 'phone-waiter', displayName: 'Phone waiter', role: 'waiter', password: 'test-waiter-password-123' })
+    const mobile = (action: string, input?: unknown, token = '') => fetch(`${origin}/api/mobile/${action}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ input }),
+    })
+    expect((await mobile('menu')).status).toBe(401)
+    expect((await mobile('login', { branchId: 'wrong', username: 'phone-waiter', password: 'test-waiter-password-123' })).status).toBe(403)
+    const signed = await mobile('login', { branchId: 'main', username: 'phone-waiter', password: 'test-waiter-password-123' })
+    expect(signed.status).toBe(200)
+    const token = ((await signed.json()) as { result: { token: string } }).result.token
+    const menuResponse = await mobile('menu', null, token)
+    expect(menuResponse.status).toBe(200)
+    const menu = ((await menuResponse.json()) as { result: MenuData }).result
+    const input = { requestId: randomUUID(), type: 'dine_in', tableId: menu.tables[0].id,
+      customerName: '', deliveryAddress: '', discount: null,
+      items: [{ productId: menu.products[0].id, quantity: 1, note: '' }] }
+    const saved = await mobile('order', input, token)
+    expect(saved.status).toBe(200)
+    const orderId = ((await saved.json()) as { result: SavedOrder }).result.id
+    const repeated = await mobile('order', input, token)
+    expect(((await repeated.json()) as { result: SavedOrder }).result.id).toBe(orderId)
+    const printInput = { requestId: randomUUID(), orderId, kind: 'bill' }
+    const printResponse = await mobile('print', printInput, token)
+    expect(printResponse.status).toBe(200)
+    expect(((await printResponse.json()) as { result: { status: string } }).result.status).toBe('queued')
+    expect((await mobile('print', printInput, token)).status).toBe(200)
+    expect((await mobile('claimPrintJob', { deviceId: randomUUID(), kinds: ['bill'] }, token)).status).toBe(404)
+    const phoneStatus = ((await (await mobile('menu', null, token)).json()) as { result: { printJobs: { claimToken?: string; document?: unknown }[] } }).result.printJobs
+    expect(phoneStatus).toHaveLength(1)
+    expect(phoneStatus[0].claimToken).toBeUndefined(); expect(phoneStatus[0].document).toBeUndefined()
+    const desktopClaim = await call<{ id: string; claimToken: string }>('claimPrintJob', { deviceId: 'fd76cd86-6a7a-478f-a609-2ce69382160a', kinds: ['bill'] })
+    expect(desktopClaim.result.id).toBe(printInput.requestId)
+    expect((await call('finishPrintJob', { id: printInput.requestId, deviceId: 'fd76cd86-6a7a-478f-a609-2ce69382160a', claimToken: desktopClaim.result.claimToken, status: 'submitted' })).response.status).toBe(200)
+    expect((await mobile('collectPayment', { orderId }, token)).status).toBe(404)
+    expect((await mobile('logout', null, token)).status).toBe(200)
+    expect((await mobile('menu', null, token)).status).toBe(401)
+  })
+
   it('serves the app and rejects cross-origin, unsupported, and malformed requests', async () => {
     const page = await fetch(origin)
     expect(page.status).toBe(200)

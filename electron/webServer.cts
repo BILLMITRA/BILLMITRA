@@ -21,6 +21,7 @@ export function createWebServer(options: Options) {
   if (!branches.length || branches.some(branch => !/^[a-z0-9][a-z0-9-]{0,63}$/.test(branch.id) || !branch.name.trim()) || new Set(branches.map(branch => branch.id)).size !== branches.length) throw new Error('Branch IDs must be unique lowercase slugs and branch names are required.')
   if (options.origin && new URL(options.origin).origin !== options.origin) throw new Error('Configure an origin without a path or trailing slash.')
   const sessions = new Map<string, Session>()
+  const mobileSessions = new Map<string, Session>()
   let nextId = 0
   const lifetime = options.sessionLifetimeMs ?? 8 * 60 * 60 * 1000
 
@@ -30,6 +31,10 @@ export function createWebServer(options: Options) {
   }
   const sweep = setInterval(() => {
     for (const [token, session] of sessions) if (session.expiresAt <= Date.now()) discard(token, session)
+    for (const [token, session] of mobileSessions) if (session.expiresAt <= Date.now()) {
+      session.backend.logout(session.id)
+      mobileSessions.delete(token)
+    }
   }, 60_000)
   sweep.unref()
 
@@ -66,6 +71,60 @@ export function createWebServer(options: Options) {
     const path = (request.url ?? '/').split('?')[0]
     if (path === '/api/branches' && request.method === 'GET') {
       json(response, 200, { branches: branches.map(({ id, name }) => ({ id, name })) })
+      return
+    }
+    if (path.startsWith('/api/mobile/')) {
+      if (request.method !== 'POST') { json(response, 405, { error: 'Use POST.' }); return }
+      if (!request.headers['content-type']?.startsWith('application/json')) { json(response, 415, { error: 'JSON is required.' }); return }
+      let input: unknown
+      try { input = (await body(request)).input }
+      catch { json(response, 400, { error: 'Invalid request.' }); return }
+      const action = path.slice('/api/mobile/'.length)
+      if (action === 'login') {
+        if (mobileSessions.size >= 1000) { json(response, 503, { error: 'Too many mobile sessions.' }); return }
+        const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+        const branch = branches.find(item => item.id === record.branchId)
+        if (!branch) { json(response, 403, { error: 'Select a configured branch.' }); return }
+        const id = ++nextId
+        try {
+          const staff = branch.backend.invoke(posChannels.loginStaff, id, { username: record.username, password: record.password })
+          // A phone session can only enter a waiter-authorized workspace.
+          branch.backend.invoke(posChannels.getWaiterMenu, id)
+          const token = randomBytes(32).toString('hex')
+          mobileSessions.set(token, { id, backend: branch.backend, branchId: branch.id, expiresAt: Date.now() + lifetime })
+          json(response, 200, { result: { token, staff, branch: { id: branch.id, name: branch.name } } })
+        } catch (error) {
+          branch.backend.logout(id)
+          json(response, 401, { error: error instanceof Error ? error.message : 'Sign-in failed.' })
+        }
+        return
+      }
+      const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.authorization ?? '')?.[1] ?? ''
+      const session = mobileSessions.get(token)
+      if (!session || session.expiresAt <= Date.now()) {
+        if (session) { session.backend.logout(session.id); mobileSessions.delete(token) }
+        json(response, 401, { error: 'Sign in again on this phone.' }); return
+      }
+      if (action === 'logout') {
+        session.backend.logout(session.id); mobileSessions.delete(token)
+        json(response, 200, { result: null }); return
+      }
+      const channel = action === 'menu' ? posChannels.getWaiterMenu : action === 'order' ? posChannels.createOrder : action === 'print' ? posChannels.requestWaiterPrint : null
+      if (!channel) { json(response, 404, { error: 'Unknown waiter operation.' }); return }
+      try {
+        // Recheck the waiter role before every write, including after a role change.
+        session.backend.invoke(posChannels.getWaiterMenu, session.id)
+        const result = session.backend.invoke(channel, session.id, input)
+        session.expiresAt = Date.now() + lifetime
+        json(response, 200, { result })
+      } catch (error) {
+        if (error instanceof ZodError) json(response, 400, { error: error.issues.map(issue => issue.message).join(' ') })
+        else {
+          const message = error instanceof Error ? error.message : ''
+          json(response, /SQLITE|no such (table|column)|constraint failed|syntax error/i.test(message) ? 500 : 400,
+            { error: /SQLITE|no such (table|column)|constraint failed|syntax error/i.test(message) ? 'The operation could not be saved.' : message || 'The operation failed.' })
+        }
+      }
       return
     }
     if (path.startsWith('/api/')) {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { RestaurantManagementService } from './services/restaurantManagement.cjs'
+import { PrintManagementService } from './services/printManagement.cjs'
 import { FinancialManagementService } from './services/financialManagement.cjs'
 import { acquireDatabaseLease, DatabaseBackupService } from './services/databaseBackups.cjs'
 import { DatabaseSync } from 'node:sqlite'
@@ -950,7 +951,8 @@ export function createPosBackend(databasePath: string) {
   register('waiter:menu', event => {
     requireStaffPermission(event, 'waiter:operate')
     const menu = loadMenu()
-    return { ...menu, activeOrders: menu.activeOrders.filter(order => order.type === 'dine_in') }
+    const orders = menu.activeOrders.filter(order => order.type === 'dine_in')
+    return { ...menu, activeOrders: orders.map(order => ({ ...order, kitchenTickets: printing.tickets(order.id) })), printJobs: printing.list(orders.map(order => order.id)) }
   })
   withTransaction(database, () => {
     if (database.prepare('SELECT version FROM schema_migrations WHERE version = 15').get()) return
@@ -963,6 +965,29 @@ export function createPosBackend(databasePath: string) {
       database.prepare('INSERT INTO kitchen_tickets(id,order_id,status,items_json) VALUES(?,?,?,?)').run(randomUUID(), row.id, row.status, JSON.stringify(orderFromRow(row.id)!.items))
     }
     database.prepare('INSERT INTO schema_migrations(version) VALUES(15)').run()
+  })
+  const printing = new PrintManagementService(database, action => withTransaction(database, action), orderFromRow)
+  printing.migrate()
+  const printerActor = (event: RequestContext) => {
+    const staff = getStaffAccessState(event).staff
+    if (!staff) throw new Error('Sign in to operate desktop printers.')
+    return staff
+  }
+  register('print:request', (event, input) => printing.request(requireStaffPermission(event, 'waiter:operate'), input))
+  register('print:request-pos', (event, input) => printing.request(requireStaffPermission(event, 'pos:access'), input))
+  register('print:details', (event, raw) => {
+    requireStaffPermission(event, 'pos:access')
+    const orderId = z.string().uuid().parse(raw)
+    const order = orderFromRow(orderId)
+    if (!order || order.type !== 'dine_in' || order.status === 'paid' || order.status === 'voided') throw new Error('Select an open saved table order.')
+    return { order, kitchenTickets: printing.tickets(orderId), jobs: printing.list([orderId]) }
+  })
+  register('print:claim', (event, input) => printing.claim(printerActor(event), input))
+  register('print:finish', (event, input) => printing.finish(printerActor(event), input))
+  register('print:list', event => {
+    const actor = printerActor(event)
+    if (actor.role !== 'kitchen') requireStaffPermission(event, 'pos:access')
+    return printing.list().filter(job => actor.role !== 'kitchen' || job.kind === 'kot')
   })
   register('payments:ledger', (event, input) => { requireStaffPermission(event, 'pos:access'); return financial.ledger(input) })
   register('payments:collect', (event, input) => financial.collect(requireStaffPermission(event, 'payments:record'), input))

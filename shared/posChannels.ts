@@ -1,4 +1,10 @@
 export const posChannels = {
+  getOrderPrintDetails: 'print:details',
+  requestPosPrint: 'print:request-pos',
+  requestWaiterPrint: 'print:request',
+  claimPrintJob: 'print:claim',
+  finishPrintJob: 'print:finish',
+  listPrintJobs: 'print:list',
   getWaiterMenu: 'waiter:menu',
   listBackups: 'backups:list',
   createBackup: 'backups:create',

@@ -2,9 +2,19 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createPosBackend } from './backend.cjs'
+import { createRemotePos } from './remotePos.cjs'
 import { posChannels } from '../shared/posChannels.js'
+import { desktopPrinting } from './desktopPrinting.cjs'
 
-let backend: ReturnType<typeof createPosBackend>
+let backend: ReturnType<typeof createPosBackend> | ReturnType<typeof createRemotePos>
+
+// A shared printer journal must have a single desktop owner.
+const primaryInstance = app.requestSingleInstanceLock()
+if (!primaryInstance) app.quit()
+app.on('second-instance', () => {
+  const window = BrowserWindow.getAllWindows().find(item => item.isVisible())
+  if (window) { if (window.isMinimized()) window.restore(); window.focus() }
+})
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -19,8 +29,17 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   })
+  const printers = desktopPrinting(window, app.getPath('userData'), `${process.env.BILLMITRA_DESKTOP_SERVER ?? 'local'}|${process.env.BILLMITRA_DESKTOP_BRANCH ?? 'main'}`, (channel, id, input) => backend.invoke(channel, id, input))
+  for (const [channel, action] of Object.entries({ 'desktop-print:state': () => printers.getState(), 'desktop-print:settings': (input: unknown) => printers.saveSettings(input), 'desktop-print:details': (input: unknown) => printers.getOrderDetails(input), 'desktop-print:request': (input: unknown) => printers.request(input) })) {
+    ipcMain.removeHandler(channel)
+    ipcMain.handle(channel, (event, input: unknown) => {
+      if (event.sender !== window.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Desktop printer access is restricted to the application window.')
+      return action(input)
+    })
+  }
 
   const rendererEntry = app.isPackaged
     ? pathToFileURL(join(__dirname, '../../dist/index.html')).href
@@ -41,7 +60,11 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  backend = createPosBackend(join(app.getPath('userData'), 'harbor-pos.sqlite'))
+  if (!primaryInstance) return
+  const connectedOrigin = process.env.BILLMITRA_DESKTOP_SERVER
+  backend = connectedOrigin
+    ? createRemotePos(connectedOrigin, process.env.BILLMITRA_DESKTOP_BRANCH ?? 'main')
+    : createPosBackend(join(app.getPath('userData'), 'harbor-pos.sqlite'))
   for (const channel of Object.values(posChannels)) {
     ipcMain.handle(channel, (event, input: unknown) => {
       if (event.senderFrame !== event.sender.mainFrame) {

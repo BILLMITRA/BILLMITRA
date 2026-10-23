@@ -27,6 +27,7 @@ import type { BackupInfo } from '../../shared/restaurant'
 declare global {
   interface Window {
     pos: {
+      connectionMode: 'connected' | 'local'
       getWaiterMenu: () => Promise<MenuData>
       listBackups: () => Promise<BackupInfo[]>
       createBackup: () => Promise<BackupInfo>

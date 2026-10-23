@@ -2,6 +2,8 @@
 
 Restaurant billing software built with React, TypeScript, Electron, Node.js and SQLite. It runs as a Windows desktop application or a browser application served by Node.js. This remains a development build; visual end-to-end checks, production load testing, invoice requirements, and deployment verification are outstanding.
 
+The separate Android/iPhone waiter application is in [`apps/waiter-mobile`](apps/waiter-mobile/README.md). It has native table/menu/order screens and an authenticated waiter API. To make phone orders visible in the desktop cashier and kitchen, start Electron in connected mode with `BILLMITRA_DESKTOP_SERVER` set to the same HTTPS server and `BILLMITRA_DESKTOP_BRANCH` set to the branch ID. Connected mode does not migrate or synchronize the original offline desktop database. See the mobile README for development and signed-build requirements.
+
 ## Run
 
 Use Node.js 24 and npm. Install dependencies with `npm install` if needed.

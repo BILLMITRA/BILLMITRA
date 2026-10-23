@@ -11,5 +11,5 @@
     "types": ["node"],
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["./**/*.cts", "../shared/billing.ts", "../shared/domain.ts", "../shared/managerSecurity.ts", "../shared/staffSecurity.ts", "../shared/staffPermissions.ts"]
+  "include": ["./**/*.cts", "../shared/billing.ts", "../shared/domain.ts", "../shared/managerSecurity.ts", "../shared/staffSecurity.ts", "../shared/staffPermissions.ts", "../shared/posChannels.ts"]
 }

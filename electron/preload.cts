@@ -21,6 +21,7 @@ import type {
 } from '../shared/domain.js'
 
 const api = {
+  connectionMode: process.env.BILLMITRA_DESKTOP_SERVER ? 'connected' as const : 'local' as const,
   getWaiterMenu: () => ipcRenderer.invoke('waiter:menu'),
   listBackups: () => ipcRenderer.invoke('backups:list'),
   createBackup: () => ipcRenderer.invoke('backups:create'),
@@ -81,3 +82,9 @@ const api = {
 }
 
 contextBridge.exposeInMainWorld('pos', api)
+contextBridge.exposeInMainWorld('desktopPrinting', {
+  getState: () => ipcRenderer.invoke('desktop-print:state'),
+  saveSettings: (settings: unknown) => ipcRenderer.invoke('desktop-print:settings', settings),
+  getOrderDetails: (orderId: unknown) => ipcRenderer.invoke('desktop-print:details', orderId),
+  request: (input: unknown) => ipcRenderer.invoke('desktop-print:request', input),
+})

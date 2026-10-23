@@ -21,6 +21,7 @@ async function invoke<T>(method: keyof typeof posChannels, input?: unknown): Pro
 }
 
 export const browserPos: Window['pos'] = {
+  connectionMode: 'connected',
   getWaiterMenu: () => invoke('getWaiterMenu'),
   listBackups: () => invoke('listBackups'),
   createBackup: () => invoke('createBackup'),

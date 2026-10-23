@@ -592,3 +592,17 @@
   .table-order-menu .category-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .table-order-menu .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.table-tile{min-width:0;display:flex;flex-direction:column;gap:5px;align-self:stretch}
+.table-tile .table-card{width:100%;flex:1}
+.table-card.timer-open{background:#1461a5;border-color:#0d518e}
+.table-card.timer-overdue{background:#b63832;border-color:#972923}
+.table-card.timer-open:hover,.table-card.timer-open.selected{border-color:#063c70;box-shadow:0 0 0 2px #c9e2f8}
+.table-card.timer-overdue:hover,.table-card.timer-overdue.selected{border-color:#7d1713;box-shadow:0 0 0 2px #f4cdca}
+.table-card.timer-open .table-name,.table-card.timer-overdue .table-name,.table-card.timer-open .table-floor-name,.table-card.timer-overdue .table-floor-name,.table-card.timer-open .table-meta,.table-card.timer-overdue .table-meta,.table-card.timer-open .table-order,.table-card.timer-overdue .table-order,.table-card.timer-open .table-order b,.table-card.timer-overdue .table-order b{color:#fff}
+.table-card.timer-open .table-icon,.table-card.timer-overdue .table-icon,.table-card.timer-open .status-label,.table-card.timer-overdue .status-label{color:#fff;background:#ffffff24}
+.table-card.timer-open .table-order,.table-card.timer-overdue .table-order{border-color:#ffffff55}
+.table-elapsed{display:flex;align-items:center;gap:5px;margin-top:9px;color:#fff;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.table-elapsed b{font-size:18px;letter-spacing:.3px}.table-elapsed>span{font-size:9px}
+.table-print-actions{display:flex;gap:5px}.table-print-actions button{min-width:0;flex:1;min-height:34px;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px 3px;background:#fff;border:1px solid #ccdbd0;border-radius:7px;color:#235e41;font-size:10px;font-weight:700;cursor:pointer}
+.table-print-actions button:hover{background:#eaf5ee}.table-print-actions button:focus-visible,.table-card:focus-visible{outline:3px solid #267c51;outline-offset:2px}
+.table-legend .legend-dot.timer-open{background:#1461a5}.table-legend .legend-dot.timer-overdue{background:#b63832}.table-legend{flex-wrap:wrap}
