@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { RestaurantManagementService } from './services/restaurantManagement.cjs'
 import { PrintManagementService } from './services/printManagement.cjs'
+import { SavedTableBills } from './services/savedTableBills.cjs'
 import { FinancialManagementService } from './services/financialManagement.cjs'
 import { acquireDatabaseLease, DatabaseBackupService } from './services/databaseBackups.cjs'
 import { DatabaseSync } from 'node:sqlite'
@@ -543,6 +544,7 @@ export function createPosBackend(databasePath: string) {
         CASE WHEN voided_at IS NOT NULL THEN 'voided'
           WHEN paid_at IS NULL THEN status ELSE 'paid' END AS status,
         paid_at AS paidAt, table_id AS tableId,
+        saved_at AS savedAt, saved_by AS savedBy, saved_table_name AS savedTableName, saved_table_floor AS savedTableFloor,
         voided_reason AS voidReason, voided_at AS voidedAt,
         customer_name AS customerName, delivery_address AS deliveryAddress,
         created_at AS createdAt, subtotal_paise AS subtotalPaise, tax_paise AS taxPaise,
@@ -572,6 +574,7 @@ export function createPosBackend(databasePath: string) {
         o.created_at AS startedAt, o.status
       FROM restaurant_tables t
       LEFT JOIN orders o ON o.table_id = t.id
+        AND o.saved_at IS NULL
         AND o.status IN ('ordering', 'preparing', 'ready', 'payment_pending')
         AND o.paid_at IS NULL AND o.voided_at IS NULL
       ORDER BY t.floor, t.name
@@ -766,6 +769,7 @@ export function createPosBackend(databasePath: string) {
       }
 
       let orderId = input.orderId
+      if (orderId && orderFromRow(orderId)?.savedAt) throw new Error('This bill is saved for the cashier. Refresh tables before adding items.')
       if (orderId && financial.hasUnrefundedPayments(orderId)) throw new Error('Bills with collected payments cannot be edited. Refund open-bill payments first.')
       if (orderId) {
         const existingOrder = database.prepare(`
@@ -819,6 +823,7 @@ export function createPosBackend(databasePath: string) {
         if (input.tableId) {
           const openOrder = database.prepare(`
             SELECT id FROM orders WHERE table_id = ?
+              AND saved_at IS NULL
               AND paid_at IS NULL AND voided_at IS NULL
               AND status IN ('ordering', 'preparing', 'ready', 'payment_pending')
           `).get(input.tableId)
@@ -951,7 +956,7 @@ export function createPosBackend(databasePath: string) {
   register('waiter:menu', event => {
     requireStaffPermission(event, 'waiter:operate')
     const menu = loadMenu()
-    const orders = menu.activeOrders.filter(order => order.type === 'dine_in')
+    const orders = menu.activeOrders.filter(order => order.type === 'dine_in' && !order.savedAt)
     return { ...menu, activeOrders: orders.map(order => ({ ...order, kitchenTickets: printing.tickets(order.id) })), printJobs: printing.list(orders.map(order => order.id)) }
   })
   withTransaction(database, () => {
@@ -962,12 +967,18 @@ export function createPosBackend(databasePath: string) {
       CREATE INDEX kitchen_tickets_status ON kitchen_tickets(status,created_at);`)
     const rows = database.prepare("SELECT id,status FROM orders WHERE paid_at IS NULL AND voided_at IS NULL AND status IN ('ordering','preparing','ready')").all() as { id: string; status: string }[]
     for (const row of rows) {
-      database.prepare('INSERT INTO kitchen_tickets(id,order_id,status,items_json) VALUES(?,?,?,?)').run(randomUUID(), row.id, row.status, JSON.stringify(orderFromRow(row.id)!.items))
+      const items = database.prepare(`SELECT id, product_id AS productId, product_name AS productName,
+        unit_price_paise AS unitPricePaise, tax_rate_bps AS taxRateBps, quantity, note
+        FROM order_items WHERE order_id=? ORDER BY rowid`).all(row.id).map(item => savedOrderItemSchema.parse(item))
+      database.prepare('INSERT INTO kitchen_tickets(id,order_id,status,items_json) VALUES(?,?,?,?)').run(randomUUID(), row.id, row.status, JSON.stringify(items))
     }
     database.prepare('INSERT INTO schema_migrations(version) VALUES(15)').run()
   })
   const printing = new PrintManagementService(database, action => withTransaction(database, action), orderFromRow)
   printing.migrate()
+  const savedTableBills = new SavedTableBills(database, action => withTransaction(database, action), orderFromRow)
+  savedTableBills.migrate()
+  register('waiter:save-bill', (event, input) => savedTableBills.save(requireStaffPermission(event, 'waiter:operate'), input))
   const printerActor = (event: RequestContext) => {
     const staff = getStaffAccessState(event).staff
     if (!staff) throw new Error('Sign in to operate desktop printers.')

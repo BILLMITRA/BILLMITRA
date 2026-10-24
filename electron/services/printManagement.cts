@@ -5,7 +5,7 @@ import type { SavedOrder, StaffIdentity } from '../../shared/domain.js'
 import type { ClaimedPrintJob, PrintDocument, PrintJobSummary, PrintKind } from '../../shared/printing.js'
 import { staffHasPermission } from '../../shared/staffPermissions.js'
 
-const requestSchema = z.object({ requestId: z.string().uuid(), orderId: z.string().uuid(), kind: z.enum(['bill', 'kot']), ticketId: z.string().uuid().optional() }).strict()
+const requestSchema = z.object({ requestId: z.string().uuid(), orderId: z.string().uuid(), kind: z.enum(['bill', 'kot']), ticketId: z.string().uuid().optional(), copy: z.boolean().optional() }).strict()
 const claimSchema = z.object({ deviceId: z.string().uuid(), kinds: z.array(z.enum(['bill', 'kot'])).min(1).max(2) }).strict()
 const finishSchema = z.object({ id: z.string().uuid(), deviceId: z.string().uuid(), claimToken: z.string().uuid(), status: z.enum(['submitted', 'failed', 'unknown']), error: z.string().max(500).default('') }).strict()
 type Row = PrintJobSummary & { documentJson: string; fingerprint: string; actorId: string; deviceId: string | null; claimToken: string | null }
@@ -62,7 +62,7 @@ export class PrintManagementService {
         order.items = JSON.parse(ticket.itemsJson) as SavedOrder['items']
         ticketCreatedAt = ticket.createdAt
       }
-      const copy = Boolean(this.db.prepare("SELECT id FROM print_jobs WHERE order_id=? AND kind=? AND ticket_id IS ? AND status <> 'failed' LIMIT 1").get(order.id, input.kind, input.ticketId ?? null))
+      const copy = input.copy === true || Boolean(this.db.prepare("SELECT id FROM print_jobs WHERE order_id=? AND kind=? AND ticket_id IS ? AND status <> 'failed' LIMIT 1").get(order.id, input.kind, input.ticketId ?? null))
       const document: PrintDocument = { order, tableName: table.name, floor: table.floor, requestedBy: actor.displayName, ticketId: input.ticketId ?? null, ticketCreatedAt, copy }
       this.db.prepare("INSERT INTO print_jobs(id,order_id,kind,ticket_id,actor_id,fingerprint,document_json,status,copy) VALUES(?,?,?,?,?,?,?,'queued',?)").run(input.requestId, order.id, input.kind, input.ticketId ?? null, actor.id, fingerprint, JSON.stringify(document), Number(copy))
       this.db.prepare("INSERT INTO audit_log(id,action,entity_type,entity_id,actor,reason,details_json) VALUES(?,'print.requested','order',?,?,'waiter_request',?)").run(randomUUID(), order.id, actor.username, JSON.stringify({ jobId: input.requestId, kind: input.kind, ticketId: input.ticketId, copy }))

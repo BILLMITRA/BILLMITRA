@@ -1,12 +1,12 @@
 import * as SQLite from 'expo-sqlite'
 import * as SecureStore from 'expo-secure-store'
-import type { Line, OrderInput, PrintInput, Session } from './api'
+import type { Line, OrderInput, PrintInput, SaveBillInput, Session } from './api'
 
 const sessionKey = 'billmitra-waiter-session'
 const db = SQLite.openDatabaseAsync('waiter-local.sqlite')
 async function ready() {
   const database = await db
-  await database.execAsync('CREATE TABLE IF NOT EXISTS drafts (scope TEXT NOT NULL, table_id TEXT NOT NULL, lines TEXT NOT NULL, PRIMARY KEY(scope, table_id)); CREATE TABLE IF NOT EXISTS pending (scope TEXT PRIMARY KEY, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pending_print (scope TEXT PRIMARY KEY, payload TEXT NOT NULL);')
+  await database.execAsync('CREATE TABLE IF NOT EXISTS drafts (scope TEXT NOT NULL, table_id TEXT NOT NULL, lines TEXT NOT NULL, PRIMARY KEY(scope, table_id)); CREATE TABLE IF NOT EXISTS pending (scope TEXT PRIMARY KEY, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pending_print (scope TEXT PRIMARY KEY, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pending_save (scope TEXT PRIMARY KEY, payload TEXT NOT NULL);')
   return database
 }
 export const scopeOf = (session: Session) => `${session.server}|${session.branch.id}|${session.staff.id}`
@@ -40,3 +40,11 @@ export async function putPendingPrint(scope: string, input: PrintInput) {
   await (await ready()).runAsync('INSERT INTO pending_print(scope,payload) VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET payload=excluded.payload', scope, JSON.stringify(input))
 }
 export async function clearPendingPrint(scope: string) { await (await ready()).runAsync('DELETE FROM pending_print WHERE scope = ?', scope) }
+export async function getPendingSave(scope: string): Promise<SaveBillInput | null> {
+  const row = await (await ready()).getFirstAsync<{ payload: string }>('SELECT payload FROM pending_save WHERE scope = ?', scope)
+  return row ? JSON.parse(row.payload) as SaveBillInput : null
+}
+export async function putPendingSave(scope: string, input: SaveBillInput) {
+  await (await ready()).runAsync('INSERT INTO pending_save(scope,payload) VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET payload=excluded.payload', scope, JSON.stringify(input))
+}
+export async function clearPendingSave(scope: string) { await (await ready()).runAsync('DELETE FROM pending_save WHERE scope = ?', scope) }

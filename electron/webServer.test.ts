@@ -184,6 +184,18 @@ describe('restaurant browser backend', () => {
     expect(desktopClaim.result.id).toBe(printInput.requestId)
     expect((await call('finishPrintJob', { id: printInput.requestId, deviceId: 'fd76cd86-6a7a-478f-a609-2ce69382160a', claimToken: desktopClaim.result.claimToken, status: 'submitted' })).response.status).toBe(200)
     expect((await mobile('collectPayment', { orderId }, token)).status).toBe(404)
+    const parked = await mobile('save-bill', { orderId }, token)
+    expect(parked.status).toBe(200)
+    const parkedOrder = ((await parked.json()) as { result: SavedOrder }).result
+    expect(parkedOrder).toMatchObject({ id: orderId, savedBy: 'Phone waiter', tableId: input.tableId })
+    expect((await mobile('save-bill', { orderId }, token)).status).toBe(200)
+    const desktopMenu = (await call<MenuData>('loadMenu')).result
+    expect(desktopMenu.tables.find(table => table.id === input.tableId)?.orderId).toBeNull()
+    expect(desktopMenu.activeOrders.find(order => order.id === orderId)?.savedAt).toBeTruthy()
+    expect(((await (await mobile('menu', null, token)).json()) as { result: MenuData }).result.activeOrders).toEqual([])
+    const reused = await mobile('order', { ...input, requestId: randomUUID() }, token)
+    expect(reused.status).toBe(200)
+    expect((await call('recordPayment', { requestId: randomUUID(), orderId, method: 'cash' })).response.status).toBe(200)
     expect((await mobile('logout', null, token)).status).toBe(200)
     expect((await mobile('menu', null, token)).status).toBe(401)
   })

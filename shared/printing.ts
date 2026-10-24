@@ -2,7 +2,7 @@ import type { SavedOrder } from './domain.js'
 
 export type PrintKind = 'bill' | 'kot'
 export type PrintStatus = 'queued' | 'printing' | 'submitted' | 'failed' | 'unknown'
-export interface PrintRequest { requestId: string; orderId: string; kind: PrintKind; ticketId?: string }
+export interface PrintRequest { requestId: string; orderId: string; kind: PrintKind; ticketId?: string; copy?: boolean }
 export interface PrintJobSummary {
   id: string; orderId: string; kind: PrintKind; ticketId: string | null; status: PrintStatus
   createdAt: string; error: string; copy: boolean

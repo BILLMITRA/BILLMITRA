@@ -1,4 +1,5 @@
 export const posChannels = {
+  saveWaiterBill: 'waiter:save-bill',
   getOrderPrintDetails: 'print:details',
   requestPosPrint: 'print:request-pos',
   requestWaiterPrint: 'print:request',

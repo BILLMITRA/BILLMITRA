@@ -2,8 +2,9 @@ export type Staff = { id: string; displayName: string; username: string; role: s
 export type Branch = { id: string; name: string }
 export type Product = { id: string; categoryId: string; name: string; pricePaise: number; available: boolean }
 export type Table = { id: string; name: string; floor: string; orderId: string | null; startedAt: string | null }
-export type ExistingOrder = { id: string; orderNumber: number; createdAt: string; tableId: string | null; customerName: string; discount: null | { kind: 'percentage'; valueBps: number } | { kind: 'fixed'; valuePaise: number }; items: { id: string; productName: string; quantity: number; note: string }[]; kitchenTickets?: { id: string; createdAt: string }[] }
-export type PrintInput = { requestId: string; orderId: string; kind: 'bill' | 'kot'; ticketId?: string }
+export type ExistingOrder = { id: string; orderNumber: number; createdAt: string; tableId: string | null; customerName: string; totalPaise: number; savedAt?: string | null; discount: null | { kind: 'percentage'; valueBps: number } | { kind: 'fixed'; valuePaise: number }; items: { id: string; productName: string; quantity: number; unitPricePaise: number; note: string }[]; kitchenTickets?: { id: string; createdAt: string }[] }
+export type PrintInput = { requestId: string; orderId: string; kind: 'bill' | 'kot'; ticketId?: string; copy?: boolean }
+export type SaveBillInput = { orderId: string }
 export type PrintJob = { id: string; orderId: string; kind: 'bill' | 'kot'; ticketId: string | null; status: 'queued' | 'printing' | 'submitted' | 'failed' | 'unknown'; error: string; copy: boolean }
 export type Menu = { categories: { id: string; name: string }[]; products: Product[]; tables: Table[]; activeOrders: ExistingOrder[]; printJobs?: PrintJob[] }
 export type Session = { token: string; staff: Staff; branch: Branch; server: string }
@@ -74,5 +75,6 @@ export async function getMenu(session: Session): Promise<Menu> {
   return menu
 }
 export const requestPrint = (session: Session, input: PrintInput) => request<PrintJob>(session.server, 'print', input, session.token)
-export const sendOrder = (session: Session, input: OrderInput) => request<unknown>(session.server, 'order', input, session.token)
+export const sendOrder = (session: Session, input: OrderInput) => request<ExistingOrder>(session.server, 'order', input, session.token)
+export const saveBill = (session: Session, input: SaveBillInput) => request<ExistingOrder>(session.server, 'save-bill', input, session.token)
 export const logout = (session: Session) => request<void>(session.server, 'logout', null, session.token)

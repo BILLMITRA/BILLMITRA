@@ -116,6 +116,10 @@ export interface CreateOrderInput {
 }
 
 export interface SavedOrder {
+  savedAt?: string | null
+  savedBy?: string | null
+  savedTableName?: string | null
+  savedTableFloor?: string | null
   id: string
   orderNumber: number
   deliveryNumber: number | null

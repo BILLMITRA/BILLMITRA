@@ -124,7 +124,7 @@ export function createWebServer(options: Options) {
         session.backend.logout(session.id); mobileSessions.delete(token)
         json(response, 200, { result: null }); return
       }
-      const channel = action === 'menu' ? posChannels.getWaiterMenu : action === 'order' ? posChannels.createOrder : action === 'print' ? posChannels.requestWaiterPrint : null
+      const channel = action === 'menu' ? posChannels.getWaiterMenu : action === 'order' ? posChannels.createOrder : action === 'print' ? posChannels.requestWaiterPrint : action === 'save-bill' ? posChannels.saveWaiterBill : null
       if (!channel) { json(response, 404, { error: 'Unknown waiter operation.' }); return }
       try {
         // Recheck the waiter role before every write, including after a role change.

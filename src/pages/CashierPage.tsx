@@ -23,6 +23,7 @@ import { staffHasPermission } from '../../shared/staffPermissions'
 import { RestaurantTableCard } from '../components/RestaurantTableCard'
 import { calculateTotals, formatMoney, InvoicePreview, parseDiscountInput, type DiscountMode } from '../features/billing'
 import { BillHistoryDialog } from '../features/payments'
+import { SavedBillsDialog } from '../features/payments/SavedBillsDialog'
 import { createOrder, getOrder, getStaffAccessState, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, recordDuplicateKotRequest, recordPayment, setManagerPin, updateDeliverySchedule, voidOrder } from '../services/pos'
 import { ManagerActionDialog } from '../features/security/ManagerActionDialog'
 import { KitchenTicketPreview } from '../features/kitchen/KitchenTicketPreview'
@@ -78,6 +79,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [showHistory, setShowHistory] = useState(false)
+  const [showSavedBills, setShowSavedBills] = useState(false)
+  const closeSavedBills = useCallback(() => setShowSavedBills(false), [])
   const [showStaffManagement, setShowStaffManagement] = useState(false)
   const [showManagement, setShowManagement] = useState(false)
   const [showPaymentLedger, setShowPaymentLedger] = useState(false)
@@ -226,6 +229,13 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       .slice(0, 7)
   }, [menu, search])
   const visibleTables = (menu?.tables ?? []).filter((table) => floor === 'All tables' || table.floor === floor)
+  const savedBills = (menu?.activeOrders ?? []).filter(order => Boolean(order.savedAt))
+  const printableTable = activeOrder?.type === 'dine_in' && activeOrder.tableId
+    ? (() => {
+      const original = menu?.tables.find(table => table.id === activeOrder.tableId)
+      return original ? { ...original, name: activeOrder.savedTableName ?? original.name, floor: activeOrder.savedTableFloor ?? original.floor, orderId: activeOrder.id } : null
+    })()
+    : null
   const activeDeliveryOrders = (menu?.activeOrders ?? []).filter((order) => order.type === 'delivery')
   const deliverySlots = Array.from({ length: DELIVERY_SLOT_COUNT }, (_, index) => {
     const deliveryNumber = index + 1
@@ -290,6 +300,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     && !submitting
     && !failedSubmission
   const canSaveInvoice = !submitting && !failedSubmission && !parsedDiscount.error
+    && !activeOrder?.savedAt
     && activeOrder?.status !== 'paid' && activeOrder?.status !== 'voided'
     && (cart.length > 0 || discountChanged || deliveryDetailsChanged)
     && (!discountChanged || canApplyDiscount)
@@ -464,6 +475,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   }
 
   function addProduct(product: Product): void {
+    if (activeOrder?.savedAt) return
     if (failedSubmission || submitting || activeOrder?.status === 'paid' || activeOrder?.status === 'voided') return
     setCart((current) => {
       const found = current.find((line) => line.product.id === product.id)
@@ -742,6 +754,22 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setError('')
     setSavedMessage('')
     setShowHistory(false)
+    setShowSavedBills(false)
+  }
+
+  async function openSavedBill(order: SavedOrder): Promise<void> {
+    if (submitting || paymentSubmitting || failedSubmission || failedPayment) {
+      setError('Resolve the current order or payment attempt before opening a saved bill.'); return
+    }
+    if ((cart.length || discountChanged) && !window.confirm('Discard unsaved changes and open this saved bill?')) return
+    try {
+      const latest = await getOrder(order.id)
+      if (!latest) throw new Error('Saved bill not found. Refresh restaurant data.')
+      if (latest.status === 'paid' || latest.status === 'voided') {
+        await refreshMenu(); setError('This saved bill was already closed.'); return
+      }
+      selectHistoricalBill({ order: latest, payment: null })
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to open saved bill.') }
   }
 
   async function settleBill(order: SavedOrder): Promise<void> {
@@ -935,8 +963,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
 
       <main className="main-panel">
         <header className="topbar">
-          <div className="breadcrumb"><span>Restaurant</span><span>/</span><b>{serviceSection === 'tables' ? tableViewOpen && selectedTableData ? `Table ${selectedTableData.name}` : 'All tables' : serviceSection === 'parcel' ? 'Takeaway' : 'Home delivery'}</b></div>
+          <div className="breadcrumb"><span>Restaurant</span><span>/</span><b>{activeOrder?.savedAt ? `Saved bill #${activeOrder.orderNumber}` : serviceSection === 'tables' ? tableViewOpen && selectedTableData ? `Table ${selectedTableData.name}` : 'All tables' : serviceSection === 'parcel' ? 'Takeaway' : 'Home delivery'}</b></div>
           <div className="topbar-actions">
+            <button className="staff-management-button" onClick={() => setShowSavedBills(true)}>Saved Bills ({savedBills.length})</button>
             <DesktopPrinters />
             {staffHasPermission(staff.role, 'waiter:operate') && <button className="staff-management-button" onClick={() => setShowWaiter(true)}>Waiter</button>}
             {(staffHasPermission(staff.role, 'menu:manage') || staffHasPermission(staff.role, 'reports:view')) && <button className="staff-management-button" onClick={() => setShowManagement(true)}>Management</button>}
@@ -950,6 +979,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
 
         <div className="workspace">
           <section className={`catalog-panel ${tableViewOpen || deliveryOrderOpen || parcelOrderOpen ? 'table-order-catalog' : serviceSection === 'delivery' || serviceSection === 'parcel' ? 'delivery-slot-catalog' : ''}`}>
+            {!!savedBills.length && <div className="alert success-alert" role="status"><span>{savedBills.length} bill{savedBills.length === 1 ? '' : 's'} saved by waiters. Payment still due.</span><button onClick={() => setShowSavedBills(true)}>View Saved Bills</button></div>}
+            {activeOrder?.savedAt && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && <div className="alert success-alert"><span>Saved bill #{activeOrder.orderNumber} · Former table {activeOrder.savedTableName} · {activeOrder.savedTableFloor} · Saved by {activeOrder.savedBy}. Review the items and record payment to close this bill.</span></div>}
             {!tableViewOpen && !deliveryOrderOpen && !parcelOrderOpen && <div className="page-heading">
               <div>
                 <div className="eyebrow">{serviceSection === 'tables' ? tableViewOpen ? 'DINE-IN ORDER' : 'SERVICE FLOOR' : 'NEW ORDER'}</div>
@@ -1077,7 +1108,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             {savedMessage && <div className="alert success-alert"><Check size={16} />{savedMessage}<span className="sync-pill">{connected ? 'Saved to branch server' : 'Saved locally'}</span></div>}
             <div className="product-grid">
               {visibleProducts.map((product, index) => (
-                <button key={product.id} className={`product-card product-tone-${index % 5}`} onClick={() => addProduct(product)} disabled={Boolean(failedSubmission) || submitting || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}>
+                <button key={product.id} className={`product-card product-tone-${index % 5}`} onClick={() => addProduct(product)} disabled={Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}>
                   <span className="dish-art"><span>{product.categoryId === 'drinks' ? '🥭' : product.categoryId === 'breads' ? '🫓' : product.categoryId === 'desserts' ? '🍮' : product.categoryId === 'starters' ? '🍢' : '🍛'}</span><i /></span>
                   <span className="product-details"><strong>{product.name}</strong><small>{product.description}</small><b>{formatMoney(product.pricePaise)}</b></span>
                   <span className="add-product"><Plus size={15} /></span>
@@ -1094,7 +1125,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               <div><div className="eyebrow">CURRENT BILL</div><h2>{activeOrder ? `Order ${formatOrderReference(activeOrder)}` : orderType === 'delivery' ? 'New delivery' : orderType === 'parcel' ? 'New takeaway' : 'New order'}</h2></div>
               <div className="bill-header-actions">
                 {activeOrder && <button className="bill-action-button print-bill-button" onClick={() => {
-                  if (window.desktopPrinting && selectedTableData?.orderId === activeOrder.id && activeOrder.status !== 'paid' && activeOrder.status !== 'voided') setTablePrint({ table: selectedTableData, kind: 'bill' })
+                  if (window.desktopPrinting && printableTable && activeOrder.status !== 'paid' && activeOrder.status !== 'voided') setTablePrint({ table: printableTable, kind: 'bill' })
                   else setShowInvoice(true)
                 }}><Printer size={15} />Print bill</button>}
                 {activeOrder && activeOrder.status !== 'voided' && <button className="bill-action-button" disabled={cart.length > 0 || discountChanged || paymentSubmitting || Boolean(failedPayment)} onClick={() => setShowPaymentLedger(true)}>Split payment / refunds</button>}
@@ -1111,7 +1142,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                 if (tableViewOpen) setTableViewOpen(false)
                 else setService('tables')
               }}>
-                <span className="table-chip-icon"><Armchair size={17} /></span><span><small>TABLE</small><b>{selectedTableData ? `Table ${selectedTableData.name}` : 'Choose a table'}</b></span>{selectedTableData && <span className="table-chip-seats"><Users size={13} />{selectedTableData.capacity}</span>}
+                <span className="table-chip-icon"><Armchair size={17} /></span><span><small>{activeOrder?.savedAt ? 'FORMER TABLE' : 'TABLE'}</small><b>{activeOrder?.savedAt ? `Table ${activeOrder.savedTableName}` : selectedTableData ? `Table ${selectedTableData.name}` : 'Choose a table'}</b></span>{selectedTableData && <span className="table-chip-seats"><Users size={13} />{selectedTableData.capacity}</span>}
               </button>
             ) : (
               <div className="guest-fields">
@@ -1130,7 +1161,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                 {orderType === 'parcel' && <label><span>Pickup name</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Name for this order" disabled={Boolean(failedSubmission) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'} /></label>}
               </div>
             )}
-            <div className="order-status-row"><span className={`status-dot ${activeOrder?.status ?? 'ordering'}`} />{activeOrder?.status === 'paid' ? 'Paid' : activeOrder?.status === 'voided' ? 'Voided' : activeOrder ? `Open · ${activeOrder.status.replace('_', ' ')}` : 'Not submitted'}<span>{itemCount} {itemCount === 1 ? 'item' : 'items'}</span></div>
+            <div className="order-status-row"><span className={`status-dot ${activeOrder?.status ?? 'ordering'}`} />{activeOrder?.status === 'paid' ? 'Paid' : activeOrder?.status === 'voided' ? 'Voided' : activeOrder?.savedAt ? 'Saved · payment due' : activeOrder ? `Open · ${activeOrder.status.replace('_', ' ')}` : 'Not submitted'}<span>{itemCount} {itemCount === 1 ? 'item' : 'items'}</span></div>
             <div className="bill-item-search">
               <label className="search-box" htmlFor="bill-menu-search">
                 <Search size={17} />
@@ -1146,7 +1177,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                     }
                   }}
                   placeholder="Find a menu item…"
-                  disabled={Boolean(failedSubmission) || submitting || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}
+                  disabled={Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}
                   autoComplete="off"
                 />
                 <kbd>Ctrl K</kbd>
@@ -1160,7 +1191,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                       role="option"
                       aria-selected="false"
                       onClick={() => addSearchResult(product)}
-                      disabled={Boolean(failedSubmission) || submitting || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}
+                      disabled={Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}
                     >
                       <span><b>{product.name}</b><small>{menu?.categories.find((category) => category.id === product.categoryId)?.name ?? product.categoryId}</small></span>
                       <strong>{formatMoney(product.pricePaise)}</strong>
@@ -1177,7 +1208,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               {!hasManagerPin && canManageSettings && <button className="right-action security-setup" onClick={() => setManagerDialogMode('setup')}><ShieldCheck size={15} />Set manager PIN</button>}
               <button className="right-action unavailable" disabled title="Staff calling is available when the waiter module is implemented">Call staff</button>
               <button className="right-action" onClick={() => {
-                if (window.desktopPrinting && activeOrder && selectedTableData?.orderId === activeOrder.id) setTablePrint({ table: selectedTableData, kind: 'kot' })
+                if (window.desktopPrinting && printableTable && activeOrder) setTablePrint({ table: printableTable, kind: 'kot' })
                 else void openDuplicateKot()
               }} disabled={!activeOrder || cart.length > 0 || activeOrder.status === 'paid' || activeOrder.status === 'voided'} title={cart.length > 0 ? 'Save added items before printing a kitchen ticket' : 'Choose a saved kitchen batch to print'}>
                 <Printer size={15} />{window.desktopPrinting && activeOrder?.type === 'dine_in' ? 'Print KOT' : 'Duplicate KOT'}
@@ -1357,6 +1388,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           onSelect={selectHistoricalBill}
         />
       )}
+      {showSavedBills && <SavedBillsDialog orders={savedBills} onClose={closeSavedBills} onSelect={order => void openSavedBill(order)} />}
       {tablePrint && <TablePrintDialog table={tablePrint.table} kind={tablePrint.kind} onClose={closeTablePrint} />}
       {showStaffManagement && canManageStaff && <StaffManagementDialog onClose={() => setShowStaffManagement(false)} />}
       {showPaymentLedger && activeOrder && <PaymentLedgerDialog orderId={activeOrder.id} canRefund={staffHasPermission(staff.role, 'payments:refund')} onClose={() => {

@@ -2,7 +2,7 @@
   "expo": {
     "name": "BillMitra Waiter",
     "slug": "billmitra-waiter",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -11,7 +11,7 @@
       "bundleIdentifier": "com.billmitra.waiter"
     },
     "android": {
-      "versionCode": 4,
+      "versionCode": 5,
       "package": "com.billmitra.waiter",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
