@@ -155,6 +155,30 @@
 .delivery-event-list article > div { display: grid; gap: 3px; }
 .delivery-event-list b { color: #3e4d42; font-size: 9px; text-transform: capitalize; }
 .delivery-event-list small { color: #7d897f; font-size: 8px; line-height: 12px; }
+.delivery-bulk-print { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid #e1e9e2; border-radius: 8px; background: #fff; color: #526256; font-size: 10px; }
+.delivery-bulk-print button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 1px solid #286f4c; border-radius: 6px; background: #286f4c; color: #fff; font-size: 10px; font-weight: 700; cursor: pointer; }
+.delivery-bulk-print button:disabled { opacity: .5; cursor: not-allowed; }
+.delivery-bulk-print small { color: #9b5948; }
+.delivery-schedule-table input[type='checkbox'], .delivery-run-option input { accent-color: #286f4c; cursor: pointer; }
+.delivery-run-modal { width: min(620px, 100%); }
+.delivery-run-list { display: grid; gap: 7px; max-height: 310px; overflow: auto; }
+.delivery-run-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid #e1e9e2; border-radius: 7px; cursor: pointer; }
+.delivery-run-option:has(input:checked) { border-color: #76ae89; background: #f1f8f2; }
+.delivery-run-option > span { display: grid; gap: 4px; }
+.delivery-run-option b { color: #2d4936; font-size: 11px; }
+.delivery-run-option small { color: #6c796f; font-size: 9px; line-height: 15px; }
+.delivery-settlement-modal { width: min(980px, 100%); }
+.delivery-settlement-filters { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+.delivery-settlement-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.delivery-settlement-totals > div { display: grid; gap: 5px; padding: 10px; border: 1px solid #e5ebe6; border-radius: 7px; background: #f7faf7; }
+.delivery-settlement-totals small { color: #738176; font-size: 9px; }
+.delivery-settlement-totals b { color: #286f4c; font-size: 15px; }
+.delivery-settlement-table-wrap { overflow: auto; max-height: 350px; }
+.delivery-settlement-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+.delivery-settlement-table th, .delivery-settlement-table td { padding: 9px; border-bottom: 1px solid #e8eee9; text-align: left; vertical-align: top; }
+.delivery-settlement-table th { color: #66746a; background: #f6f9f6; }
+.delivery-settlement-table td small { display: block; margin-top: 4px; color: #829087; font-size: 9px; }
+.delivery-settlement-modal footer button { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 760px) {
   .delivery-customer-layout { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
   .delivery-customer-header { padding: 14px; }
@@ -181,4 +205,6 @@
   .delivery-schedule-date, .delivery-schedule-sort { flex: 1; justify-content: space-between; }
   .delivery-schedule-date input, .delivery-schedule-sort select { min-width: 0; }
   .delivery-rider-form-grid, .delivery-detail-grid { grid-template-columns: 1fr; }
+  .delivery-settlement-filters { grid-template-columns: 1fr; }
+  .delivery-settlement-totals { grid-template-columns: repeat(2, 1fr); }
 }

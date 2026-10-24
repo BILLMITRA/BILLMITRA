@@ -35,6 +35,11 @@ const assignmentSchema = z.object({
   riderId: z.string().uuid(),
   reason: z.string().trim().max(250).default(''),
 })
+const batchAssignmentSchema = z.object({
+  orderIds: z.array(z.string().uuid()).min(1).max(20).refine(ids => new Set(ids).size === ids.length, 'Select each delivery only once.'),
+  riderId: z.string().uuid(),
+  reason: z.string().trim().max(250).default(''),
+})
 const operationSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('ready_for_pickup'), orderId: z.string().uuid() }),
   z.object({ kind: z.literal('dispatch'), orderId: z.string().uuid() }),
@@ -98,6 +103,10 @@ export class DeliveryManagementService {
     const rows = this.database.prepare(`
       SELECT id, display_number AS orderNumber, delivery_number AS deliveryNumber,
         created_at AS createdAt, scheduled_pickup_at AS scheduledPickupAt,
+        (SELECT e.created_at FROM delivery_events e
+          WHERE e.order_id = orders.id AND e.new_rider_id = orders.delivery_rider_id
+            AND e.event_type IN ('assigned', 'reassigned')
+          ORDER BY e.rowid DESC LIMIT 1) AS assignedAt,
         ready_for_pickup_at AS readyForPickupAt,
         scheduled_delivery_at AS promisedDeliveryAt, actual_pickup_at AS actualPickupAt,
         dispatched_at AS dispatchedAt, delivered_at AS deliveredAt,
@@ -107,18 +116,22 @@ export class DeliveryManagementService {
         delivery_area AS deliveryArea, delivery_landmark AS deliveryLandmark,
         delivery_instructions AS deliveryInstructions,
         assigned_delivery_to AS assignedDeliveryTo, delivery_rider_id AS riderId,
-        total_paise AS totalPaise
+        total_paise AS totalPaise,
+        COALESCE((SELECT SUM(t.amount_paise) FROM payment_tenders t WHERE t.order_id = orders.id), 0) AS collectedPaise,
+        COALESCE((SELECT SUM(f.amount_paise) FROM payment_refunds f
+          JOIN payment_tenders t ON t.id = f.tender_id WHERE t.order_id = orders.id), 0) AS refundedPaise
       FROM orders WHERE type = 'delivery'
       ORDER BY CASE WHEN delivered_at IS NULL THEN 0 ELSE 1 END,
         COALESCE(scheduled_delivery_at, created_at), created_at DESC
     `).all() as Array<{
-      id: string; orderNumber: number; deliveryNumber: number | null; createdAt: string
+      id: string; orderNumber: number; deliveryNumber: number | null; createdAt: string; assignedAt: string | null
       scheduledPickupAt: string | null; readyForPickupAt: string | null; promisedDeliveryAt: string | null
       actualPickupAt: string | null; dispatchedAt: string | null; deliveredAt: string | null
       deliveryStatus: DeliveryScheduleEntry['deliveryStatus']; foodStatus: DeliveryScheduleEntry['foodStatus']
       paidAt: string | null; voidedAt: string | null; customerName: string; contactNumber: string
       deliveryAddress: string; deliveryArea: string; deliveryLandmark: string
       deliveryInstructions: string; assignedDeliveryTo: string; riderId: string | null; totalPaise: number
+      collectedPaise: number; refundedPaise: number
     }>
     const itemQuery = this.database.prepare(`
       SELECT id, product_id AS productId, product_name AS productName,
@@ -129,6 +142,8 @@ export class DeliveryManagementService {
       ...row,
       reference: row.deliveryNumber === null ? `#${row.orderNumber}` : `HD-${row.deliveryNumber}`,
       paymentStatus: row.voidedAt ? 'voided' : row.paidAt ? 'paid' : 'unpaid',
+      collectedPaise: Math.max(0, row.collectedPaise - row.refundedPaise),
+      balancePaise: row.voidedAt || row.paidAt ? 0 : Math.max(0, row.totalPaise - row.collectedPaise + row.refundedPaise),
       rider: row.riderId ? riders.get(row.riderId) ?? null : null,
       items: z.array(scheduleItemSchema).parse(itemQuery.all(row.id)),
     }))
@@ -226,9 +241,21 @@ export class DeliveryManagementService {
   assignRider(actor: StaffIdentity, rawInput: unknown): void {
     hasRolePermission(actor, 'delivery:assign')
     const input = assignmentSchema.parse(rawInput)
+    this.transaction(() => this.assignOne(actor, input))
+  }
+
+  assignRiderBatch(actor: StaffIdentity, rawInput: unknown): void {
+    hasRolePermission(actor, 'delivery:assign')
+    const input = batchAssignmentSchema.parse(rawInput)
+    // One transaction means capacity or validation failure cannot leave half a run assigned.
     this.transaction(() => {
+      for (const orderId of input.orderIds) this.assignOne(actor, { orderId, riderId: input.riderId, reason: input.reason })
+    })
+  }
+
+  private assignOne(actor: StaffIdentity, input: z.infer<typeof assignmentSchema>): void {
       const order = this.orderForUpdate(input.orderId)
-      if (order.foodStatus !== 'ready') throw new Error('Mark the order ready for pickup before assigning a rider.')
+      if (!['ordering', 'preparing', 'ready'].includes(order.foodStatus)) throw new Error('This order cannot be assigned in its current state.')
       if (order.voidedAt) throw new Error('A voided bill cannot receive a delivery assignment.')
       if (order.deliveryStatus === 'delivered' || order.deliveryStatus === 'cancelled') {
         throw new Error('This delivery is already closed.')
@@ -263,7 +290,6 @@ export class DeliveryManagementService {
       if (result.changes !== 1) throw new Error('The delivery changed while assigning it. Refresh and try again.')
       this.recordEvent(actor, input.orderId, eventType, order.deliveryStatus, 'assigned',
         order.riderId, rider.id, input.reason, { riderId: rider.id })
-    })
   }
 
   operate(actor: StaffIdentity, rawInput: unknown): void {
@@ -291,6 +317,7 @@ export class DeliveryManagementService {
         if (order.deliveryStatus !== 'assigned' || !order.riderId) {
           throw new Error('Assign an eligible rider before dispatching this order.')
         }
+        if (order.foodStatus !== 'ready') throw new Error('Mark the order ready for pickup before dispatching it.')
         if (!order.contactNumber.trim() || !order.deliveryAddress.trim()) {
           throw new Error('Enter the customer contact number and full delivery address before dispatch.')
         }

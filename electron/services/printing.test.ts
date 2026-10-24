@@ -62,6 +62,26 @@ it('lets a cashier request table printing without granting waiter access or paym
   }
   expect((backend.invoke('pos:get-order', 4, order.id) as SavedOrder).status).not.toBe('paid')
 })
+it('queues separate HD bills for one delivery run with the saved customer and rider details', () => {
+  const deliveries = [1, 5].map(deliveryNumber => backend.invoke('pos:create-order', 4, {
+    requestId: randomUUID(), type: 'delivery', deliveryNumber, tableId: null,
+    customerName: `Customer ${deliveryNumber}`, contactNumber: '9876543210',
+    deliveryAddress: '<Main Street>', deliveryArea: 'Vengara', deliveryLandmark: 'Market',
+    discount: null, items: [{ productId, quantity: 1, note: '' }],
+  }) as SavedOrder)
+  for (const delivery of deliveries) {
+    expect(backend.invoke('print:details', 4, delivery.id)).toMatchObject({ order: { id: delivery.id } })
+    expect(backend.invoke('print:request-pos', 4, { requestId: randomUUID(), orderId: delivery.id, kind: 'bill' }))
+      .toMatchObject({ status: 'queued' })
+  }
+  const jobs = [claim(4, ['bill']), claim(4, ['bill'])]
+  expect(jobs.map(job => job?.orderId)).toEqual(deliveries.map(delivery => delivery.id))
+  const html = printDocument('bill', jobs[0]!.document, { bill: '', kot: '', restaurant: 'BillMitra', branch: 'Vengara' })
+  expect(html).toContain('HD-1')
+  expect(html).toContain('&lt;Main Street&gt;')
+  expect(html).toContain('9876543210')
+  expect(() => backend.invoke('print:request-pos', 4, { requestId: randomUUID(), orderId: deliveries[0].id, kind: 'kot', ticketId: randomUUID() })).toThrow('kitchen workflow')
+})
 it('prints the selected immutable KOT batch, with notes and without prices', () => {
   backend.invoke('pos:create-order', 2, { requestId: randomUUID(), orderId: order.id, type: 'dine_in', tableId: order.tableId, customerName: '', deliveryAddress: '', discount: null, items: [{ productId, quantity: 2, note: 'Extra hot' }] })
   const batches = tickets()

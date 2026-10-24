@@ -468,6 +468,11 @@ export function createPosBackend(databasePath: string) {
     deliveryManagement.assignRider(actor, rawInput)
   }
 
+  function assignDeliveryRiderBatch(event: RequestContext, rawInput: unknown): void {
+    const actor = requireStaffPermission(event, 'delivery:assign')
+    deliveryManagement.assignRiderBatch(actor, rawInput)
+  }
+
   function operateDelivery(event: RequestContext, rawInput: unknown): void {
     const isCancellation = typeof rawInput === 'object' && rawInput !== null
       && 'kind' in rawInput && rawInput.kind === 'cancelled'
@@ -990,7 +995,7 @@ export function createPosBackend(databasePath: string) {
     requireStaffPermission(event, 'pos:access')
     const orderId = z.string().uuid().parse(raw)
     const order = orderFromRow(orderId)
-    if (!order || order.type !== 'dine_in' || order.status === 'paid' || order.status === 'voided') throw new Error('Select an open saved table order.')
+    if (!order || !['dine_in', 'delivery'].includes(order.type) || order.status === 'paid' || order.status === 'voided') throw new Error('Select an open saved table or delivery order.')
     return { order, kitchenTickets: printing.tickets(orderId), jobs: printing.list([orderId]) }
   })
   register('print:claim', (event, input) => printing.claim(printerActor(event), input))
@@ -1057,6 +1062,7 @@ export function createPosBackend(databasePath: string) {
   register('delivery:save-rider', (event, input: unknown) => saveDeliveryRider(event, input))
   register('delivery:update-schedule', (event, input: unknown) => updateDeliverySchedule(event, input))
   register('delivery:assign-rider', (event, input: unknown) => assignDeliveryRider(event, input))
+  register('delivery:assign-rider-batch', (event, input: unknown) => assignDeliveryRiderBatch(event, input))
   register('delivery:operate', (event, input: unknown) => operateDelivery(event, input))
   register('delivery:list-events', (event, orderId: unknown) => listDeliveryEvents(event, orderId))
   register('pos:load-menu', (event) => {

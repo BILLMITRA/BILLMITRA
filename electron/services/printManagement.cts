@@ -53,8 +53,11 @@ export class PrintManagementService {
         return summary(prior)
       }
       const order = this.order(input.orderId)
-      if (!order || order.type !== 'dine_in' || ['paid', 'voided'].includes(order.status)) throw new Error('Refresh tables and select an open saved order.')
-      const table = this.db.prepare('SELECT name,floor FROM restaurant_tables WHERE id=?').get(order.tableId!) as { name: string; floor: string }
+      if (!order || !['dine_in', 'delivery'].includes(order.type) || ['paid', 'voided'].includes(order.status)) throw new Error('Refresh and select an open saved order.')
+      if (order.type === 'delivery' && input.kind !== 'bill') throw new Error('Use the kitchen workflow for delivery KOT printing.')
+      const table = order.type === 'dine_in'
+        ? this.db.prepare('SELECT name,floor FROM restaurant_tables WHERE id=?').get(order.tableId!) as { name: string; floor: string }
+        : { name: '', floor: '' }
       let ticketCreatedAt: string | null = null
       if (input.ticketId) {
         const ticket = this.db.prepare('SELECT items_json AS itemsJson,created_at AS createdAt FROM kitchen_tickets WHERE id=? AND order_id=?').get(input.ticketId, order.id) as { itemsJson: string; createdAt: string } | undefined

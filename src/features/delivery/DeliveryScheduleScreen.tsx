@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ArrowLeft, Ban, CalendarClock, Check, CircleAlert, History, MapPin, Pencil,
-  Phone, Plus, RefreshCw, Search, Truck, UserRound, Users, X,
+  ArrowLeft, Ban, CalendarClock, Check, CircleAlert, Download, History, MapPin, Pencil,
+  Phone, Plus, Printer, RefreshCw, Search, Truck, UserRound, Users, X,
 } from 'lucide-react'
 import type {
   DeliveryEvent,
@@ -12,8 +12,10 @@ import type {
   RiderAvailability,
 } from '../../../shared/domain'
 import { deliveryDelayMinutes, filterDeliverySchedule } from '../../../shared/delivery'
+import { riderSettlementSummary } from '../../../shared/deliverySettlement'
 import {
   assignDeliveryRider,
+  assignDeliveryRiderBatch,
   listDeliveryEvents,
   listDeliveryRiders,
   listDeliverySchedule,
@@ -93,12 +95,20 @@ export function DeliveryScheduleScreen({
   const [selectedRiderId, setSelectedRiderId] = useState('')
   const [assignmentReason, setAssignmentReason] = useState('')
   const [riderSearch, setRiderSearch] = useState('')
+  const [batchAssignOpen, setBatchAssignOpen] = useState(false)
+  const [batchOrderIds, setBatchOrderIds] = useState<string[]>([])
+  const [batchRiderId, setBatchRiderId] = useState('')
+  const [printOrderIds, setPrintOrderIds] = useState<string[]>([])
+  const [settlementOpen, setSettlementOpen] = useState(false)
+  const [settlementRiderId, setSettlementRiderId] = useState('')
+  const [settlementFrom, setSettlementFrom] = useState('')
+  const [settlementTo, setSettlementTo] = useState('')
   const [riderEditor, setRiderEditor] = useState<RiderEditor>(null)
   const [riderName, setRiderName] = useState('')
   const [employeeCode, setEmployeeCode] = useState('')
   const [riderPhone, setRiderPhone] = useState('')
   const [riderAvailability, setRiderAvailability] = useState<RiderAvailability>('available')
-  const [riderCapacity, setRiderCapacity] = useState('1')
+  const [riderCapacity, setRiderCapacity] = useState('5')
   const [riderActive, setRiderActive] = useState(true)
   const [scheduleOrder, setScheduleOrder] = useState<DeliveryScheduleEntry | null>(null)
   const [pickupTime, setPickupTime] = useState('')
@@ -188,6 +198,78 @@ export function DeliveryScheduleScreen({
     })
   }, [assignOrder, canReassign, riderSearch, riders])
 
+  const batchCandidates = entries.filter(entry => ['ordering', 'preparing', 'ready'].includes(entry.foodStatus)
+    && entry.deliveryStatus === 'pending' && !entry.rider && entry.paymentStatus !== 'voided')
+  const batchRiders = riders.filter(rider => rider.active && rider.availability === 'available'
+    && rider.maxActiveDeliveries - rider.activeDeliveryCount >= batchOrderIds.length)
+  const printEntries = entries.filter(entry => printOrderIds.includes(entry.id) && entry.paymentStatus === 'unpaid')
+  const settlementRider = riders.find(rider => rider.id === settlementRiderId) ?? null
+  const settlement = riderSettlementSummary(entries, settlementRiderId, settlementFrom, settlementTo)
+
+  async function saveBatchAssignment(): Promise<void> {
+    if (!batchOrderIds.length || !batchRiderId || busyOrderId) return
+    setBusyOrderId('batch')
+    setError('')
+    try {
+      await assignDeliveryRiderBatch({ orderIds: batchOrderIds, riderId: batchRiderId })
+      setNotice(`${batchOrderIds.length} delivery bills assigned to ${riders.find(rider => rider.id === batchRiderId)?.name ?? 'rider'}.`)
+      setBatchAssignOpen(false)
+      setBatchOrderIds([])
+      setBatchRiderId('')
+      await refresh(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The delivery run could not be assigned.')
+    } finally {
+      setBusyOrderId(null)
+    }
+  }
+
+  async function printSelectedBills(): Promise<void> {
+    if (!window.desktopPrinting || !printEntries.length || busyOrderId) return
+    setBusyOrderId('print')
+    setError('')
+    setNotice('')
+    const queued: string[] = []
+    try {
+      for (const entry of printEntries) {
+        const details = await window.desktopPrinting.getOrderDetails(entry.id)
+        if (details.jobs.some(job => job.kind === 'bill' && job.status !== 'failed')
+          && !window.confirm(`${entry.reference} already has a bill print request. Print another copy?`)) continue
+        await window.desktopPrinting.request({ orderId: entry.id, kind: 'bill' })
+        queued.push(entry.reference)
+      }
+      setNotice(queued.length ? `Sent ${queued.join(', ')} to the desktop bill printer queue.` : 'No new print requests were sent.')
+      setPrintOrderIds([])
+    } catch (cause) {
+      setNotice(queued.length ? `Already queued: ${queued.join(', ')}.` : '')
+      setError(`${cause instanceof Error ? cause.message : 'Printing failed.'} Check the printer queue before retrying.`)
+    } finally {
+      setBusyOrderId(null)
+    }
+  }
+
+  function exportSettlement(): void {
+    if (!settlementRider) return
+    const rows = [
+      ['Bill', 'Assigned at', 'Customer', 'Customer phone', 'Location', 'Delivery status', 'Payment', 'Invoice amount', 'Recorded payments', 'Balance'],
+      ...settlement.bills.map(entry => [entry.reference, displayDate(entry.assignedAt), entry.customerName,
+        entry.contactNumber, [entry.deliveryArea, entry.deliveryLandmark, entry.deliveryAddress].filter(Boolean).join(' / '),
+        entry.deliveryStatus, entry.paymentStatus, (entry.totalPaise / 100).toFixed(2),
+        (entry.collectedPaise / 100).toFixed(2), (entry.balancePaise / 100).toFixed(2)]),
+    ]
+    const csv = rows.map(row => row.map(value => {
+      const text = String(value)
+      const safe = /^[=+\-@]/.test(text.trimStart()) ? `'${text}` : text
+      return `"${safe.replaceAll('"', '""')}"`
+    }).join(',')).join('\r\n')
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `delivery-settlement-${settlementRider.name.replace(/[^a-z0-9]+/gi, '-')}.csv`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
   async function runOperation(order: DeliveryScheduleEntry, operation: DeliveryOperation): Promise<void> {
     if (busyOrderId) return
     setBusyOrderId(order.id)
@@ -236,7 +318,7 @@ export function DeliveryScheduleScreen({
     setEmployeeCode(rider === 'new' || rider === null ? '' : rider.employeeCode)
     setRiderPhone(rider === 'new' || rider === null ? '' : rider.contactNumber)
     setRiderAvailability(rider === 'new' || rider === null ? 'available' : rider.availability)
-    setRiderCapacity(rider === 'new' || rider === null ? '1' : String(rider.maxActiveDeliveries))
+    setRiderCapacity(rider === 'new' || rider === null ? '5' : String(rider.maxActiveDeliveries))
     setRiderActive(rider === 'new' || rider === null || rider.active)
   }
 
@@ -304,6 +386,8 @@ export function DeliveryScheduleScreen({
         </div>
         <div className="delivery-schedule-header-actions">
           {canManageRiders && <button onClick={() => openRiderEditor('new')}><Plus size={16} /> Add rider</button>}
+          <button onClick={() => { setBatchOrderIds([]); setBatchRiderId(''); setBatchAssignOpen(true) }}><Truck size={15} /> Assign multiple</button>
+          <button onClick={() => { setSettlementRiderId(riders[0]?.id ?? ''); setSettlementOpen(true) }}><Users size={15} /> Rider settlement</button>
           <button onClick={() => void refresh()} disabled={loading}><RefreshCw size={15} /> Refresh</button>
           <button className="delivery-schedule-close" onClick={onClose} aria-label="Close delivery schedule"><X size={18} /></button>
         </div>
@@ -345,28 +429,38 @@ export function DeliveryScheduleScreen({
 
         {error && <div className="delivery-schedule-error" role="alert"><CircleAlert size={16} />{error}</div>}
         {notice && <div className="delivery-schedule-notice" role="status"><Check size={16} />{notice}</div>}
+        <div className="delivery-bulk-print">
+          <span>{printOrderIds.length ? `${printOrderIds.length} bill${printOrderIds.length === 1 ? '' : 's'} selected` : 'Select HD bills below to print them together.'}</span>
+          <button onClick={() => void printSelectedBills()} disabled={!printEntries.length || Boolean(busyOrderId) || !window.desktopPrinting}><Printer size={15} />{busyOrderId === 'print' ? 'Queueing…' : `Print selected bills (${printEntries.length})`}</button>
+          {!window.desktopPrinting && <small>Open the desktop application to print.</small>}
+        </div>
         <div className="delivery-schedule-table-wrap">
           <table className="delivery-schedule-table">
             <thead><tr>
+              <th><input type="checkbox" aria-label="Select all visible unpaid delivery bills" checked={visibleEntries.filter(entry => entry.paymentStatus === 'unpaid').length > 0 && visibleEntries.filter(entry => entry.paymentStatus === 'unpaid').every(entry => printOrderIds.includes(entry.id))} onChange={event => {
+                const ids = visibleEntries.filter(entry => entry.paymentStatus === 'unpaid').map(entry => entry.id)
+                setPrintOrderIds(current => event.target.checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id)))
+              }} /></th>
               <th>Order / created</th><th>Promised / delay</th><th>Pickup / ready</th><th>Customer / address</th>
               <th>Rider</th><th>Status / total</th><th>Actions</th>
             </tr></thead>
             <tbody>
-              {loading && <tr><td colSpan={7} className="delivery-schedule-empty">Loading saved deliveries…</td></tr>}
-              {!loading && visibleEntries.length === 0 && <tr><td colSpan={7} className="delivery-schedule-empty">
+              {loading && <tr><td colSpan={8} className="delivery-schedule-empty">Loading saved deliveries…</td></tr>}
+              {!loading && visibleEntries.length === 0 && <tr><td colSpan={8} className="delivery-schedule-empty">
                 {entries.length ? 'No delivery orders match these filters.' : 'No saved delivery orders yet. New home-delivery orders will appear here.'}
               </td></tr>}
               {!loading && visibleEntries.map((entry) => {
                 const lateBy = deliveryDelayMinutes(entry, now)
-                const canAssign = entry.foodStatus === 'ready' && !['delivered', 'cancelled'].includes(entry.deliveryStatus)
+                const canAssign = ['ordering', 'preparing', 'ready'].includes(entry.foodStatus) && !['delivered', 'cancelled'].includes(entry.deliveryStatus)
                   && (!entry.rider || entry.deliveryStatus === 'failed' || canReassign)
                 return (
                   <tr key={entry.id}>
+                    <td><input type="checkbox" aria-label={`Select ${entry.reference} for printing`} checked={printOrderIds.includes(entry.id)} disabled={entry.paymentStatus !== 'unpaid'} onChange={event => setPrintOrderIds(current => event.target.checked ? [...current, entry.id] : current.filter(id => id !== entry.id))} /></td>
                     <td><button className="delivery-order-reference" onClick={() => setSelectedOrder(entry)}>{entry.reference}</button><small>{displayDate(entry.createdAt)}</small></td>
                     <td>{displayDate(entry.promisedDeliveryAt)}<small className={lateBy ? 'delivery-late' : ''}>{lateBy ? `${lateBy} min late` : entry.promisedDeliveryAt ? 'On time' : 'No promise set'}</small></td>
                     <td>{displayDate(entry.actualPickupAt)}<small>{entry.readyForPickupAt ? `Ready ${displayDate(entry.readyForPickupAt)}` : entry.scheduledPickupAt ? `Planned ${displayDate(entry.scheduledPickupAt)}` : 'Not scheduled'}</small></td>
                     <td className="delivery-customer-cell"><b>{entry.customerName || 'Customer details pending'}</b><small><Phone size={11} />{entry.contactNumber || 'No phone'}</small><small><MapPin size={11} />{[entry.deliveryArea, entry.deliveryLandmark, entry.deliveryAddress].filter(Boolean).join(' · ') || 'No address'}</small></td>
-                    <td>{entry.rider?.name ?? (entry.assignedDeliveryTo ? `Unverified: ${entry.assignedDeliveryTo}` : 'Unassigned')}<small>{entry.rider ? `${entry.rider.activeDeliveryCount}/${entry.rider.maxActiveDeliveries} active` : ''}</small></td>
+                    <td>{entry.rider?.name ?? (entry.assignedDeliveryTo ? `Unverified: ${entry.assignedDeliveryTo}` : 'Unassigned')}<small>{entry.rider ? `${entry.rider.contactNumber || 'No staff phone'} · Assigned ${displayDate(entry.assignedAt)}` : ''}</small></td>
                     <td><span className={`delivery-status-badge ${entry.deliveryStatus}`}>{statusLabel(entry.deliveryStatus, entry.foodStatus)}</span><small>{formatMoney(entry.totalPaise)} · {entry.paymentStatus}</small></td>
                     <td className="delivery-row-actions">
                       <button title="View order and history" aria-label={`View ${entry.reference}`} onClick={() => setSelectedOrder(entry)}><History size={14} /></button>
@@ -380,7 +474,7 @@ export function DeliveryScheduleScreen({
                         setAssignmentReason('')
                         setRiderSearch('')
                       }}>{entry.rider ? 'Reassign' : 'Assign'}</button>}
-                      {entry.deliveryStatus === 'assigned' && <button title="Mark dispatched" onClick={() => setConfirmAction({ order: entry, kind: 'dispatch' })}>Dispatch</button>}
+                      {entry.deliveryStatus === 'assigned' && <button title={entry.foodStatus === 'ready' ? 'Mark dispatched' : 'Mark food ready before dispatch'} disabled={entry.foodStatus !== 'ready'} onClick={() => setConfirmAction({ order: entry, kind: 'dispatch' })}>Dispatch</button>}
                       {entry.deliveryStatus === 'dispatched' && <>
                         <button title="Mark delivered" onClick={() => setConfirmAction({ order: entry, kind: 'delivered' })}>Delivered</button>
                         <button title="Record delivery failure" onClick={() => { setReasonAction({ order: entry, kind: 'failed' }); setReasonText('') }}>Failed</button>
@@ -395,6 +489,39 @@ export function DeliveryScheduleScreen({
           </table>
         </div>
       </div>
+
+      {batchAssignOpen && <div className="delivery-modal-backdrop" role="presentation">
+        <section className="delivery-modal delivery-run-modal" role="dialog" aria-modal="true" aria-labelledby="delivery-run-title">
+          <header><div><span className="delivery-action-icon"><Truck size={19} /></span><h2 id="delivery-run-title">Assign delivery run</h2></div><button onClick={() => setBatchAssignOpen(false)} aria-label="Close delivery run"><X size={18} /></button></header>
+          <p>Select the delivery boy, then tick each HD bill for this run. All assignments save together when you press Done. Mark food Ready before dispatch.</p>
+          <label className="delivery-modal-field"><span>Delivery staff</span><select value={batchRiders.some(rider => rider.id === batchRiderId) ? batchRiderId : ''} onChange={event => setBatchRiderId(event.target.value)}><option value="">Select staff</option>{batchRiders.map(rider => <option key={rider.id} value={rider.id}>{rider.name} · {rider.contactNumber || 'No phone'} · {rider.maxActiveDeliveries - rider.activeDeliveryCount} spaces</option>)}</select></label>
+          {batchRiders.length === 0 && <p>No rider has space for {batchOrderIds.length || 1} bills. Edit the rider’s maximum active deliveries first.</p>}
+          <div className="delivery-run-list">
+            {batchCandidates.length === 0 && <p>No unassigned HD orders are available.</p>}
+            {batchCandidates.map(entry => <label key={entry.id} className="delivery-run-option"><input type="checkbox" checked={batchOrderIds.includes(entry.id)} onChange={event => setBatchOrderIds(current => event.target.checked ? [...current, entry.id] : current.filter(id => id !== entry.id))} /><span><b>{entry.reference} · {formatMoney(entry.totalPaise)}</b><small>{entry.customerName || 'Customer'} · {entry.contactNumber || 'No customer phone'}<br />{[entry.deliveryArea, entry.deliveryLandmark, entry.deliveryAddress].filter(Boolean).join(' · ') || 'No address entered'}</small></span></label>)}
+          </div>
+          {error && <div className="delivery-schedule-error" role="alert">{error}</div>}
+          <footer><button onClick={() => setBatchAssignOpen(false)}>Cancel</button><button className="primary" onClick={() => void saveBatchAssignment()} disabled={!batchOrderIds.length || !batchRiderId || !batchRiders.some(rider => rider.id === batchRiderId) || Boolean(busyOrderId)}>{busyOrderId === 'batch' ? 'Saving…' : `Done · assign ${batchOrderIds.length}`}</button></footer>
+        </section>
+      </div>}
+
+      {settlementOpen && <div className="delivery-modal-backdrop" role="presentation">
+        <section className="delivery-modal delivery-settlement-modal" role="dialog" aria-modal="true" aria-labelledby="delivery-settlement-title">
+          <header><div><span className="delivery-action-icon"><Users size={19} /></span><h2 id="delivery-settlement-title">Delivery boy settlement</h2></div><button onClick={() => setSettlementOpen(false)} aria-label="Close settlement"><X size={18} /></button></header>
+          <p>Review each assigned bill and reconcile payment with the cashier. This report does not record cash received from a rider.</p>
+          <div className="delivery-settlement-filters">
+            <label className="delivery-modal-field"><span>Staff name and number</span><select value={settlementRiderId} onChange={event => setSettlementRiderId(event.target.value)}><option value="">Select staff</option>{riders.map(rider => <option key={rider.id} value={rider.id}>{rider.name} · {rider.contactNumber || 'No phone'}</option>)}</select></label>
+            <label className="delivery-modal-field"><span>Assigned from</span><input type="date" value={settlementFrom} onChange={event => setSettlementFrom(event.target.value)} /></label>
+            <label className="delivery-modal-field"><span>Assigned through</span><input type="date" value={settlementTo} onChange={event => setSettlementTo(event.target.value)} /></label>
+          </div>
+          {settlementRider && <>
+            <div className="delivery-settlement-totals"><div><small>Assigned bills</small><b>{settlement.assignedCount}</b></div><div><small>Delivered</small><b>{settlement.deliveredCount}</b></div><div><small>Out now</small><b>{settlement.outForDeliveryCount}</b></div><div><small>Bill value</small><b>{formatMoney(settlement.invoicePaise)}</b></div><div><small>Recorded payments</small><b>{formatMoney(settlement.collectedPaise)}</b></div><div><small>Balance to reconcile</small><b>{formatMoney(settlement.balancePaise)}</b></div></div>
+            <p>Delivered bills with a balance: <b>{formatMoney(settlement.deliveredBalancePaise)}</b>. Confirm collection and record payment in the cashier before closing the bill.</p>
+            <div className="delivery-settlement-table-wrap"><table className="delivery-settlement-table"><thead><tr><th>Bill / assigned</th><th>Customer / location</th><th>Status</th><th>Payment</th><th>Amount / balance</th></tr></thead><tbody>{settlement.bills.map(entry => <tr key={entry.id}><td><button className="delivery-order-reference" onClick={() => { setSettlementOpen(false); setSelectedOrder(entry) }}>{entry.reference}</button><small>{displayDate(entry.assignedAt)}</small></td><td>{entry.customerName || 'Customer'}<small>{entry.contactNumber || 'No phone'} · {[entry.deliveryArea, entry.deliveryLandmark, entry.deliveryAddress].filter(Boolean).join(' · ')}</small></td><td>{statusLabel(entry.deliveryStatus, entry.foodStatus)}</td><td>{entry.paymentStatus}</td><td>{formatMoney(entry.totalPaise)}<small>Balance {formatMoney(entry.balancePaise)}</small></td></tr>)}{settlement.bills.length === 0 && <tr><td colSpan={5} className="delivery-schedule-empty">No bills assigned to this staff member in this period.</td></tr>}</tbody></table></div>
+          </>}
+          <footer><button onClick={() => setSettlementOpen(false)}>Close</button><button className="primary" onClick={exportSettlement} disabled={!settlementRider || !settlement.bills.length}><Download size={14} /> Export all bills (CSV)</button></footer>
+        </section>
+      </div>}
 
       {assignOrder && <div className="delivery-modal-backdrop" role="presentation">
         <section className="delivery-modal" role="dialog" aria-modal="true" aria-labelledby="delivery-assign-title">
@@ -457,7 +584,7 @@ export function DeliveryScheduleScreen({
       {selectedOrder && <div className="delivery-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedOrder(null) }}>
         <section className="delivery-modal delivery-order-details" role="dialog" aria-modal="true" aria-labelledby="delivery-details-title">
           <header><div><span className="delivery-action-icon"><Truck size={19} /></span><h2 id="delivery-details-title">{selectedOrder.reference} details</h2></div><button onClick={() => setSelectedOrder(null)} aria-label="Close details"><X size={18} /></button></header>
-          <div className="delivery-detail-grid"><div><small>Customer</small><b>{selectedOrder.customerName || '—'}</b></div><div><small>Phone</small><b>{selectedOrder.contactNumber || '—'}</b></div><div><small>Address</small><b>{selectedOrder.deliveryAddress || '—'}</b></div><div><small>Area / landmark</small><b>{[selectedOrder.deliveryArea, selectedOrder.deliveryLandmark].filter(Boolean).join(' · ') || '—'}</b></div><div><small>Instructions</small><b>{selectedOrder.deliveryInstructions || '—'}</b></div><div><small>Payment</small><b>{selectedOrder.paymentStatus}</b></div><div><small>Invoice total</small><b>{formatMoney(selectedOrder.totalPaise)}</b></div><div><small>Ready for pickup</small><b>{displayDate(selectedOrder.readyForPickupAt)}</b></div><div><small>Actual pickup / dispatch</small><b>{displayDate(selectedOrder.actualPickupAt)} / {displayDate(selectedOrder.dispatchedAt)}</b></div><div><small>Delivered</small><b>{displayDate(selectedOrder.deliveredAt)}</b></div></div>
+          <div className="delivery-detail-grid"><div><small>Customer</small><b>{selectedOrder.customerName || '—'}</b></div><div><small>Customer phone</small><b>{selectedOrder.contactNumber || '—'}</b></div><div><small>Address</small><b>{selectedOrder.deliveryAddress || '—'}</b></div><div><small>Area / landmark</small><b>{[selectedOrder.deliveryArea, selectedOrder.deliveryLandmark].filter(Boolean).join(' · ') || '—'}</b></div><div><small>Delivery staff</small><b>{selectedOrder.rider?.name || 'Unassigned'}</b></div><div><small>Staff phone</small><b>{selectedOrder.rider?.contactNumber || '—'}</b></div><div><small>Assigned at</small><b>{displayDate(selectedOrder.assignedAt)}</b></div><div><small>Instructions</small><b>{selectedOrder.deliveryInstructions || '—'}</b></div><div><small>Payment</small><b>{selectedOrder.paymentStatus}</b></div><div><small>Invoice total</small><b>{formatMoney(selectedOrder.totalPaise)}</b></div><div><small>Ready for pickup</small><b>{displayDate(selectedOrder.readyForPickupAt)}</b></div><div><small>Actual pickup / dispatch</small><b>{displayDate(selectedOrder.actualPickupAt)} / {displayDate(selectedOrder.dispatchedAt)}</b></div><div><small>Delivered</small><b>{displayDate(selectedOrder.deliveredAt)}</b></div></div>
           <h3>Order items</h3><div className="delivery-detail-items">{selectedOrder.items.map((item) => <div key={item.id}><span>{item.quantity} × {item.productName}<small>{item.note || 'No item notes'}</small></span><b>{formatMoney(item.unitPricePaise * item.quantity)}</b></div>)}</div>
           <h3>Delivery history</h3><div className="delivery-event-list">{events.length ? events.map((event) => <article key={event.id}><span className="delivery-event-marker" /><div><b>{event.eventType.replaceAll('_', ' ')}</b><small>{displayDate(event.createdAt)} · {event.actor}{event.reason ? ` · ${event.reason}` : ''}</small></div></article>) : <small>No delivery events recorded yet.</small>}</div>
           <footer><button onClick={() => setSelectedOrder(null)}>Close</button></footer>

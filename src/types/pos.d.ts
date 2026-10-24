@@ -67,6 +67,7 @@ declare global {
       saveDeliveryRider: (input: DeliveryRiderInput) => Promise<DeliveryRider>
       updateDeliverySchedule: (input: DeliveryScheduleInput) => Promise<void>
       assignDeliveryRider: (input: { orderId: string; riderId: string; reason?: string }) => Promise<void>
+      assignDeliveryRiderBatch: (input: { orderIds: string[]; riderId: string; reason?: string }) => Promise<void>
       operateDelivery: (input: DeliveryOperation) => Promise<void>
       listDeliveryEvents: (orderId: string) => Promise<DeliveryEvent[]>
     }

@@ -111,6 +111,8 @@ beforeEach(() => {
       details_json TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE payment_tenders (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, amount_paise INTEGER NOT NULL);
+    CREATE TABLE payment_refunds (id TEXT PRIMARY KEY, tender_id TEXT NOT NULL, amount_paise INTEGER NOT NULL);
   `)
   database.exec(deliverySchemaMigration)
   service = new DeliveryManagementService(database, withTransaction)
@@ -140,6 +142,13 @@ describe('delivery persistence and operations', () => {
     expect(entries[0].items[0]).toMatchObject({ productName: 'Paneer Meal', note: 'No onion' })
   })
 
+  it('shows the remaining bill balance after partial payment and refund', () => {
+    const id = seedOrder()
+    database.prepare('INSERT INTO payment_tenders(id,order_id,amount_paise) VALUES(?,?,?)').run('tender-1', id, 5000)
+    database.prepare('INSERT INTO payment_refunds(id,tender_id,amount_paise) VALUES(?,?,?)').run('refund-1', 'tender-1', 1000)
+    expect(service.listSchedule()[0]).toMatchObject({ totalPaise: 15000, collectedPaise: 4000, balancePaise: 11000 })
+  })
+
   it('assigns an eligible rider and updates workload using the saved assignment', async () => {
     const orderId = seedOrder()
     const riderId = await makeRider()
@@ -152,6 +161,35 @@ describe('delivery persistence and operations', () => {
       derivedAvailability: 'busy',
       canAcceptDelivery: false,
     })
+  })
+
+  it('assigns two HD bills in one transaction and records assignment times', async () => {
+    const first = seedOrder()
+    const second = seedOrder()
+    const riderId = await makeRider({ maxActiveDeliveries: 2 })
+    service.assignRiderBatch(cashier, { orderIds: [first, second], riderId })
+    const rows = service.listSchedule()
+    expect(rows.map(row => row.rider?.id)).toEqual([riderId, riderId])
+    expect(rows.every(row => Boolean(row.assignedAt))).toBe(true)
+    expect(service.listRiders()[0].activeDeliveryCount).toBe(2)
+    expect(service.listEvents(first)[0].eventType).toBe('assigned')
+    expect(service.listEvents(second)[0].eventType).toBe('assigned')
+  })
+
+  it('rolls back the whole run if a rider has too little capacity or one bill cannot be assigned', async () => {
+    const first = seedOrder()
+    const second = seedOrder()
+    const smallRider = await makeRider({ maxActiveDeliveries: 1 })
+    expect(() => service.assignRiderBatch(cashier, { orderIds: [first, second], riderId: smallRider }))
+      .toThrow('capacity')
+    expect(service.listSchedule().every(row => row.rider === null)).toBe(true)
+    expect(service.listEvents(first)).toHaveLength(0)
+
+    const largerRider = await makeRider({ name: 'Larger capacity', maxActiveDeliveries: 2 })
+    database.prepare("UPDATE orders SET status='payment_pending' WHERE id=?").run(second)
+    expect(() => service.assignRiderBatch(cashier, { orderIds: [first, second], riderId: largerRider }))
+      .toThrow('current state')
+    expect(service.listSchedule().every(row => row.rider === null)).toBe(true)
   })
 
   it('rejects an inactive or unavailable rider and a rider at capacity', async () => {
@@ -173,13 +211,18 @@ describe('delivery persistence and operations', () => {
       .toThrow('This rider has reached their active delivery capacity.')
   })
 
-  it('rejects a non-delivery order and an order that is not ready for pickup', async () => {
+  it('permits early assignment but requires food readiness before dispatch', async () => {
     const riderId = await makeRider()
     const parcelId = seedOrder({ type: 'parcel' })
     expect(() => service.assignRider(cashier, { orderId: parcelId, riderId })).toThrow('Delivery order not found.')
     const preparingId = seedOrder({ status: 'preparing' })
-    expect(() => service.assignRider(cashier, { orderId: preparingId, riderId }))
-      .toThrow('Mark the order ready for pickup before assigning a rider.')
+    service.assignRider(cashier, { orderId: preparingId, riderId })
+    expect(service.listSchedule().find(row => row.id === preparingId)?.deliveryStatus).toBe('assigned')
+    expect(() => service.operate(cashier, { kind: 'dispatch', orderId: preparingId }))
+      .toThrow('ready for pickup before dispatching')
+    service.operate(cashier, { kind: 'ready_for_pickup', orderId: preparingId })
+    service.operate(cashier, { kind: 'dispatch', orderId: preparingId })
+    expect(service.listSchedule().find(row => row.id === preparingId)?.deliveryStatus).toBe('dispatched')
   })
 
   it('requires contact number and full address before dispatch', async () => {

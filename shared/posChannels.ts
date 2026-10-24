@@ -45,6 +45,7 @@ export const posChannels = {
   saveDeliveryRider: 'delivery:save-rider',
   updateDeliverySchedule: 'delivery:update-schedule',
   assignDeliveryRider: 'delivery:assign-rider',
+  assignDeliveryRiderBatch: 'delivery:assign-rider-batch',
   operateDelivery: 'delivery:operate',
   listDeliveryEvents: 'delivery:list-events',
 } as const

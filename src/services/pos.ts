@@ -118,6 +118,10 @@ export function assignDeliveryRider(input: { orderId: string; riderId: string; r
   return posApi.assignDeliveryRider(input)
 }
 
+export function assignDeliveryRiderBatch(input: { orderIds: string[]; riderId: string; reason?: string }): Promise<void> {
+  return posApi.assignDeliveryRiderBatch(input)
+}
+
 export function operateDelivery(input: DeliveryOperation): Promise<void> {
   return posApi.operateDelivery(input)
 }

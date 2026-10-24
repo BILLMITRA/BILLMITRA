@@ -177,6 +177,7 @@ export interface DeliveryScheduleEntry {
   reference: string
   orderNumber: number
   createdAt: string
+  assignedAt: string | null
   scheduledPickupAt: string | null
   readyForPickupAt: string | null
   promisedDeliveryAt: string | null
@@ -195,6 +196,8 @@ export interface DeliveryScheduleEntry {
   assignedDeliveryTo: string
   rider: DeliveryRider | null
   totalPaise: number
+  collectedPaise: number
+  balancePaise: number
   items: SavedOrder['items']
 }
 

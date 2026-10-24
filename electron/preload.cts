@@ -75,6 +75,8 @@ const api = {
     ipcRenderer.invoke('delivery:update-schedule', input),
   assignDeliveryRider: (input: { orderId: string; riderId: string; reason?: string }): Promise<void> =>
     ipcRenderer.invoke('delivery:assign-rider', input),
+  assignDeliveryRiderBatch: (input: { orderIds: string[]; riderId: string; reason?: string }): Promise<void> =>
+    ipcRenderer.invoke('delivery:assign-rider-batch', input),
   operateDelivery: (input: DeliveryOperation): Promise<void> =>
     ipcRenderer.invoke('delivery:operate', input),
   listDeliveryEvents: (orderId: string): Promise<DeliveryEvent[]> =>
