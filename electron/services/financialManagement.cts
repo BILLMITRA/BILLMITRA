@@ -73,8 +73,9 @@ export class FinancialManagementService {
         return this.ledger(input.orderId)
       }
       const ledger = this.ledger(input.orderId)
-      const order = this.db.prepare('SELECT voided_at FROM orders WHERE id = ?').get(input.orderId) as { voided_at: string | null }
+      const order = this.db.prepare('SELECT voided_at, joined_at FROM orders WHERE id = ?').get(input.orderId) as { voided_at: string | null; joined_at: string | null }
       if (order.voided_at) throw new Error('A voided bill cannot be paid.')
+      if (order.joined_at) throw new Error('This bill was joined into another bill and cannot be paid separately.')
       if (ledger.settled) throw new Error('This bill has already been paid.')
       const amount = input.amountPaise ?? ledger.balancePaise
       if (amount <= 0 || amount > ledger.balancePaise) throw new Error('Payment must be positive and cannot exceed the remaining balance.')

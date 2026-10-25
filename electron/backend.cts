@@ -30,6 +30,7 @@ import type {
   StaffPermission,
   SplitOrderInput,
   SplitOrderResult,
+  JoinOrdersInput,
 } from '../shared/domain.js'
 
 type RequestContext = { sender: { id: number } }
@@ -108,6 +109,10 @@ export function createPosBackend(databasePath: string) {
     requestId: z.string().uuid(),
     orderId: z.string().uuid(),
     items: z.array(z.object({ itemId: z.string().uuid(), quantity: z.number().int().min(1).max(99) })).min(1).max(100),
+  })
+  const joinOrdersSchema = z.object({
+    requestId: z.string().uuid(),
+    orderIds: z.array(z.string().uuid()).min(2).max(10),
   })
   const database = new DatabaseSync(databasePath)
   closeOnFailure = () => database.close()
@@ -562,7 +567,8 @@ export function createPosBackend(databasePath: string) {
         COALESCE(NULLIF(assigned_delivery_to, ''), (
           SELECT name FROM delivery_riders WHERE id = orders.delivery_rider_id
         ), '') AS assignedDeliveryTo, contact_number AS contactNumber, type,
-        CASE WHEN voided_at IS NOT NULL THEN 'voided'
+        CASE WHEN joined_at IS NOT NULL THEN 'joined'
+          WHEN voided_at IS NOT NULL THEN 'voided'
           WHEN paid_at IS NULL THEN status ELSE 'paid' END AS status,
         paid_at AS paidAt, table_id AS tableId,
         saved_at AS savedAt, saved_by AS savedBy, saved_table_name AS savedTableName, saved_table_floor AS savedTableFloor,
@@ -596,13 +602,13 @@ export function createPosBackend(databasePath: string) {
         (SELECT COUNT(*) FROM orders active
           WHERE active.table_id = t.id AND active.saved_at IS NULL
             AND active.status IN ('ordering', 'preparing', 'ready', 'payment_pending')
-            AND active.paid_at IS NULL AND active.voided_at IS NULL) AS activeOrderCount
+            AND active.paid_at IS NULL AND active.voided_at IS NULL AND active.joined_at IS NULL) AS activeOrderCount
       FROM restaurant_tables t
       LEFT JOIN orders o ON o.id = (
         SELECT latest.id FROM orders latest
         WHERE latest.table_id = t.id AND latest.saved_at IS NULL
           AND latest.status IN ('ordering', 'preparing', 'ready', 'payment_pending')
-          AND latest.paid_at IS NULL AND latest.voided_at IS NULL
+          AND latest.paid_at IS NULL AND latest.voided_at IS NULL AND latest.joined_at IS NULL
         ORDER BY latest.created_at DESC, latest.rowid DESC LIMIT 1
       )
       ORDER BY t.floor, t.name
@@ -612,7 +618,7 @@ export function createPosBackend(databasePath: string) {
       activeOrderCount: number
     }>
     const activeOrders = database.prepare(`
-      SELECT id FROM orders WHERE (paid_at IS NULL OR (type='delivery' AND delivery_settled_at IS NULL)) AND voided_at IS NULL
+      SELECT id FROM orders WHERE (paid_at IS NULL OR (type='delivery' AND delivery_settled_at IS NULL)) AND voided_at IS NULL AND joined_at IS NULL
         AND status IN ('ordering', 'preparing', 'ready', 'payment_pending')
       ORDER BY created_at DESC
     `).all() as Array<{ id: string }>
@@ -861,6 +867,58 @@ export function createPosBackend(databasePath: string) {
       const updatedSource = orderFromRow(source.id); const split = orderFromRow(splitId)
       if (!updatedSource || !split) throw new Error('Split bills could not be loaded after saving.')
       return { source: updatedSource, split }
+    })
+  }
+
+  function joinOrders(rawInput: unknown, actor: StaffIdentity): SavedOrder {
+    const input: JoinOrdersInput = joinOrdersSchema.parse(rawInput)
+    if (new Set(input.orderIds).size !== input.orderIds.length) throw new Error('Choose different bills to join.')
+    return withTransaction(database, () => {
+      const previous = database.prepare('SELECT joined_order_id AS orderId FROM order_joins WHERE request_id=?').get(input.requestId) as { orderId: string } | undefined
+      if (previous) {
+        const order = orderFromRow(previous.orderId)
+        if (!order) throw new Error('The previously joined bill could not be loaded.')
+        return order
+      }
+      const orders = input.orderIds.map(id => orderFromRow(id))
+      if (orders.some(order => !order)) throw new Error('One or more selected bills no longer exist.')
+      const source = orders as SavedOrder[]
+      if (source.some(order => order.type !== 'dine_in' || !order.tableId || order.savedAt || !orderStatusValues.includes(order.status))) {
+        throw new Error('Only unpaid active dine-in bills can be joined.')
+      }
+      if (source.some(order => financial.hasUnrefundedPayments(order.id))) throw new Error('Refund collected payments before joining bills.')
+      const tableId = source[0].tableId!
+      const lines = source.flatMap(order => order.items)
+      const subtotal = lines.reduce((sum, item) => sum + item.unitPricePaise * item.quantity, 0)
+      const samePercentage = source.every(order => order.discount?.kind === 'percentage')
+        && source.every(order => (order.discount?.kind === 'percentage' ? order.discount.valueBps : 0) === (source[0].discount?.kind === 'percentage' ? source[0].discount.valueBps : 0))
+      const discount: BillDiscount | null = samePercentage && source[0].discount?.kind === 'percentage'
+        ? source[0].discount
+        : (() => { const amount = source.reduce((sum, order) => sum + order.discountPaise, 0); return amount ? { kind: 'fixed' as const, valuePaise: Math.min(amount, subtotal) } : null })()
+      const totals = calculateTotals(lines, discount)
+      const joinedId = randomUUID()
+      const displayNumber = (database.prepare('SELECT COALESCE(MAX(display_number), 0) + 1 AS next FROM orders').get() as { next: number }).next
+      const status: OrderStatus = source.some(order => order.status === 'preparing') ? 'preparing'
+        : source.every(order => order.status === 'ready') ? 'ready' : 'ordering'
+      database.prepare(`INSERT INTO orders (id, display_number, type, status, table_id, customer_name, delivery_address,
+        request_id, subtotal_paise, tax_paise, total_paise, discount_kind, discount_value, discount_paise)
+        VALUES (?, ?, 'dine_in', ?, ?, '', '', ?, ?, ?, ?, ?, ?, ?)`)
+        .run(joinedId, displayNumber, status, tableId, input.requestId, totals.subtotalPaise, totals.taxPaise, totals.totalPaise,
+          discount?.kind ?? 'none', discount?.kind === 'percentage' ? discount.valueBps : discount?.kind === 'fixed' ? discount.valuePaise : 0, totals.discountPaise)
+      const addItem = database.prepare(`INSERT INTO order_items(id,order_id,product_id,product_name,unit_price_paise,tax_rate_bps,quantity,note)
+        VALUES(?,?,?,?,?,?,?,?)`)
+      for (const item of lines) addItem.run(randomUUID(), joinedId, item.productId, item.productName, item.unitPricePaise, item.taxRateBps, item.quantity, item.note)
+      const archive = database.prepare("UPDATE orders SET joined_at=datetime('now'), joined_into_order_id=? WHERE id=? AND joined_at IS NULL")
+      const moveTickets = database.prepare('UPDATE kitchen_tickets SET order_id=? WHERE order_id=?')
+      for (const order of source) { archive.run(joinedId, order.id); moveTickets.run(joinedId, order.id) }
+      database.prepare('INSERT INTO order_joins(id,request_id,source_order_ids_json,joined_order_id,actor) VALUES(?,?,?,?,?)')
+        .run(randomUUID(), input.requestId, JSON.stringify(source.map(order => order.id)), joinedId, actor.username)
+      database.prepare(`INSERT INTO audit_log(id,action,entity_type,entity_id,actor,reason,details_json) VALUES
+        (?, 'order.joined', 'order', ?, ?, 'joined_bill', ?)`)
+        .run(randomUUID(), joinedId, actor.username, JSON.stringify({ sourceOrderIds: source.map(order => order.id), sourceOrderNumbers: source.map(order => order.orderNumber) }))
+      const joined = orderFromRow(joinedId)
+      if (!joined) throw new Error('The joined bill could not be loaded.')
+      return joined
     })
   }
 
@@ -1166,6 +1224,17 @@ export function createPosBackend(databasePath: string) {
     ); CREATE INDEX order_splits_source ON order_splits(source_order_id, created_at DESC);
     INSERT INTO schema_migrations(version) VALUES(22);`)
   })
+  withTransaction(database, () => {
+    if (database.prepare('SELECT version FROM schema_migrations WHERE version=23').get()) return
+    database.exec(`ALTER TABLE orders ADD COLUMN joined_at TEXT;
+      ALTER TABLE orders ADD COLUMN joined_into_order_id TEXT REFERENCES orders(id);
+      CREATE TABLE order_joins (
+        id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, source_order_ids_json TEXT NOT NULL,
+        joined_order_id TEXT NOT NULL UNIQUE REFERENCES orders(id), actor TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT(datetime('now'))
+      ); CREATE INDEX order_joins_joined ON order_joins(joined_order_id);
+      INSERT INTO schema_migrations(version) VALUES(23);`)
+  })
   register('waiter:save-bill', (event, input) => savedTableBills.save(requireStaffPermission(event, 'waiter:operate'), input))
   register('delivery:cash-handovers', (event, riderId) => deliveryCashHandovers.list(requireStaffPermission(event, 'delivery:view'), riderId))
   register('delivery:record-cash-handover', (event, input) => deliveryCashHandovers.record(requireStaffPermission(event, 'payments:record'), input))
@@ -1195,6 +1264,7 @@ export function createPosBackend(databasePath: string) {
   })
   register('payments:ledger', (event, input) => { requireStaffPermission(event, 'pos:access'); return financial.ledger(input) })
   register('pos:split-order', (event, input) => splitOrder(input, requireStaffPermission(event, 'orders:write')))
+  register('pos:join-orders', (event, input) => joinOrders(input, requireStaffPermission(event, 'orders:write')))
   register('payments:collect', (event, input) => financial.collect(requireStaffPermission(event, 'payments:record'), input))
   register('payments:refund', (event, input) => financial.refund(requireStaffPermission(event, 'payments:refund'), input))
   register('inventory:list', event => { requireStaffPermission(event, 'inventory:manage'); return restaurant.inventory() })

@@ -235,6 +235,11 @@
 .payment-confirmed small { color: #748179; font-size: 8px; }
 .payment-receipt-button { min-height: 28px; border: 1px solid #d9e9dd; border-radius: 6px; background: #f2faf4; color: #286f4c; font-size: 8px; font-weight: 700; cursor: pointer; }
 .payment-box.settled { border-color: #d8eade; background: #f5fbf6; }
+.pos-action-bar { position: fixed; z-index: 18; left: 250px; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(8, minmax(88px, 1fr)); gap: 1px; padding: 8px 16px; border-top: 1px solid #c9decf; background: #f3faf4; box-shadow: 0 -5px 18px #16322414; }
+.pos-action-bar button { min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px solid #bfdbc7; background: #fff; color: #276e4a; font-size: 10px; font-weight: 700; cursor: pointer; }
+.pos-action-bar button:hover:not(:disabled) { background: #e8f6eb; }
+.pos-action-bar button:disabled { color: #aab9ae; background: #fafcfb; cursor: not-allowed; }
+.workspace { padding-bottom: 72px; }
 .payment-hint { display: flex; align-items: center; gap: 7px; color: #8c6a3e; font-size: 8px; }
 .status-dot.paid { background: #43a36a; }
 .loading-screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #718078; font-size: 12px; }
@@ -246,6 +251,7 @@
   .table-grid { grid-template-columns: repeat(3, minmax(115px, 1fr)); }
   .product-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
   .floor-summary { gap: 18px; }
+  .pos-action-bar { left: 214px; grid-template-columns: repeat(4, 1fr); }
 }
 
 @media (max-width: 960px) {
@@ -256,6 +262,7 @@
   .table-grid { grid-template-columns: repeat(2, minmax(115px, 1fr)); }
   .product-grid { grid-template-columns: repeat(2, minmax(115px, 1fr)); }
   .floor-summary { gap: 12px; }
+  .pos-action-bar { left: 188px; }
 }
 
 /* Cashier touch targets and text sizes */

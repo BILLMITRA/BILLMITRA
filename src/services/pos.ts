@@ -18,6 +18,7 @@ import type {
   DeliveryScheduleInput,
   SavedDeliveryCustomerDetails,
   SplitOrderInput,
+  JoinOrdersInput,
 } from '../../shared/domain'
 
 const posApi = window.pos ?? browserPos
@@ -102,6 +103,10 @@ export function voidOrderItem(input: { orderId: string; itemId: string; quantity
 
 export function splitOrder(input: SplitOrderInput) {
   return posApi.splitOrder(input)
+}
+
+export function joinOrders(input: JoinOrdersInput) {
+  return posApi.joinOrders(input)
 }
 
 export function recordDuplicateKotRequest(orderId: string) {

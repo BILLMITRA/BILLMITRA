@@ -154,6 +154,25 @@ describe('restaurant operations', () => {
     expect(() => invoke('pos:split-order', { requestId: randomUUID(), orderId: result.source.id, items: result.source.items.map(item => ({ itemId: item.id, quantity: item.quantity })) })).toThrow('Leave at least one item')
   })
 
+  it('joins active table bills into one independently payable bill and preserves source history', () => {
+    const menu = invoke<import('../../shared/domain').MenuData>('pos:load-menu')
+    const [first, second] = menu.products.filter(item => item.available)
+    const create = (productId: string, quantity: number) => invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'dine_in', tableId: menu.tables[0].id, customerName: '', deliveryAddress: '', discount: null,
+      items: [{ productId, quantity, note: '' }],
+    })
+    const one = create(first.id, 1); const two = create(second.id, 2)
+    const requestId = randomUUID()
+    const joined = invoke<SavedOrder>('pos:join-orders', { requestId, orderIds: [one.id, two.id] })
+    expect(joined.items).toHaveLength(2)
+    expect(joined.totalPaise).toBe(one.totalPaise + two.totalPaise)
+    expect(invoke<SavedOrder>('pos:join-orders', { requestId, orderIds: [one.id, two.id] })).toEqual(joined)
+    const refreshed = invoke<import('../../shared/domain').MenuData>('pos:load-menu')
+    expect(refreshed.activeOrders.filter(order => order.tableId === menu.tables[0].id).map(order => order.id)).toEqual([joined.id])
+    expect(invoke<SavedOrder>('pos:get-order', one.id).status).toBe('joined')
+    expect(() => invoke('payments:collect', { requestId: randomUUID(), orderId: one.id, method: 'cash', amountPaise: 100 })).toThrow('joined')
+  })
+
   it('caps refunds at the original tender, keeps the invoice paid, and reconciles cash/report totals', () => {
     const { saved } = createBill()
     const ledger = invoke<PaymentLedger>('payments:collect', { requestId: randomUUID(), orderId: saved.id, method: 'cash', amountPaise: saved.totalPaise })

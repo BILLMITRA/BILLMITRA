@@ -40,6 +40,7 @@ export const posChannels = {
   voidOrder: 'pos:void-order',
   voidOrderItem: 'pos:void-order-item',
   splitOrder: 'pos:split-order',
+  joinOrders: 'pos:join-orders',
   recordDuplicateKotRequest: 'pos:record-duplicate-kot-request',
   listDeliverySchedule: 'delivery:list-schedule',
   findSavedDeliveryCustomer: 'delivery:find-customer',

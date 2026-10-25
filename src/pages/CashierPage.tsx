@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Armchair, ArrowDownRight, ArrowLeft, ArrowUpRight, CalendarClock, Check, ChevronDown, Coffee,
+  Armchair, ArrowDownRight, ArrowLeft, ArrowUpRight, CalendarClock, Check, ChevronDown, Coffee, GitMerge,
   Ban, CopyPlus, CreditCard, Flame, History, Minus, Plus, Printer, Search, ShieldCheck, ShoppingBag,
   Soup, Sparkles, Trash2, Truck, Users, UtensilsCrossed, Wallet, LogOut,
 } from 'lucide-react'
@@ -21,10 +21,10 @@ import type {
 import { DELIVERY_SLOT_COUNT, PARCEL_SLOT_COUNT, formatOrderReference } from '../../shared/domain'
 import { staffHasPermission } from '../../shared/staffPermissions'
 import { RestaurantTableCard } from '../components/RestaurantTableCard'
-import { calculateTotals, formatMoney, InvoicePreview, SplitBillDialog, parseDiscountInput, type DiscountMode } from '../features/billing'
+import { calculateTotals, formatMoney, InvoicePreview, JoinBillDialog, SplitBillDialog, parseDiscountInput, type DiscountMode } from '../features/billing'
 import { BillHistoryDialog } from '../features/payments'
 import { SavedBillsDialog } from '../features/payments/SavedBillsDialog'
-import { createOrder, getOrder, getStaffAccessState, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, recordDuplicateKotRequest, recordPayment, setManagerPin, splitOrder, updateDeliverySchedule, voidOrder, voidOrderItem } from '../services/pos'
+import { createOrder, getOrder, getStaffAccessState, joinOrders, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, recordDuplicateKotRequest, recordPayment, setManagerPin, splitOrder, updateDeliverySchedule, voidOrder, voidOrderItem } from '../services/pos'
 import { ManagerActionDialog } from '../features/security/ManagerActionDialog'
 import { ItemVoidDialog } from '../features/security/ItemVoidDialog'
 import { KitchenTicketPreview } from '../features/kitchen/KitchenTicketPreview'
@@ -91,6 +91,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [managerDialogMode, setManagerDialogMode] = useState<ManagerDialogMode | null>(null)
   const [showItemVoid, setShowItemVoid] = useState(false)
   const [showSplitBill, setShowSplitBill] = useState(false)
+  const [showJoinBill, setShowJoinBill] = useState(false)
   const [categoryId, setCategoryId] = useState('all')
   const [search, setSearch] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -234,6 +235,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const selectedTableOrders = useMemo(() => selectedTable
     ? (menu?.activeOrders ?? []).filter((order) => order.type === 'dine_in' && order.tableId === selectedTable && !order.savedAt)
     : [], [menu, selectedTable])
+  const joinCandidates = useMemo(() => (menu?.activeOrders ?? []).filter(order => order.type === 'dine_in' && !order.savedAt && order.id !== activeOrder?.id), [menu, activeOrder?.id])
   const savedBills = (menu?.activeOrders ?? []).filter(order => Boolean(order.savedAt))
   const printableTable = activeOrder?.type === 'dine_in' && activeOrder.tableId
     ? (() => {
@@ -320,6 +322,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const canSplitBill = Boolean(activeOrder && activeOrder.type === 'dine_in' && !activeOrder.savedAt
     && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && activeOrder.items.reduce((total, item) => total + item.quantity, 0) > 1
     && cart.length === 0 && !discountChanged && !submitting && !failedSubmission)
+  const canJoinBill = Boolean(activeOrder && activeOrder.type === 'dine_in' && !activeOrder.savedAt && joinCandidates.length
+    && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && cart.length === 0 && !discountChanged && !submitting && !failedSubmission)
   const itemCount = existingLines.reduce((count, item) => count + item.quantity, 0)
     + cart.reduce((count, item) => count + item.quantity, 0)
 
@@ -644,6 +648,16 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setSavedMessage(`Bill #${result.source.orderNumber} split into new bill #${result.split.orderNumber}.`)
     try { await refreshMenu() }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'The bills were split but the table could not refresh.') }
+  }
+
+  async function handleJoinBills(input: import('../../shared/domain').JoinOrdersInput): Promise<void> {
+    const joined = await joinOrders(input)
+    setActiveOrder(joined)
+    setShowJoinBill(false)
+    setLastPayment(null)
+    setSavedMessage(`Combined bill #${joined.orderNumber} created.`)
+    try { await refreshMenu() }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'The bills were joined but the table could not refresh.') }
   }
 
   async function openDuplicateKot(): Promise<void> {
@@ -1285,6 +1299,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               <button className="right-action" onClick={() => setShowSplitBill(true)} disabled={!canSplitBill} title={!canSplitBill ? 'Select an unpaid dine-in bill with two or more items and no unsaved changes' : 'Move selected quantities to a new independent bill'}>
                 <CopyPlus size={15} />Split bill
               </button>
+              <button className="right-action" onClick={() => setShowJoinBill(true)} disabled={!canJoinBill} title={!canJoinBill ? 'Open an unpaid dine-in bill and keep another active dine-in bill available' : 'Combine this bill with another active dine-in bill'}>
+                <GitMerge size={15} />Join bills
+              </button>
               {!hasManagerPin && canManageSettings && <button className="right-action security-setup" onClick={() => setManagerDialogMode('setup')}><ShieldCheck size={15} />Set manager PIN</button>}
               <button className="right-action unavailable" disabled title="Staff calling is available when the waiter module is implemented">Call staff</button>
               <button className="right-action" onClick={() => {
@@ -1416,6 +1433,24 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             )}
           </aside>
         </div>
+        <nav className="pos-action-bar" aria-label="POS quick actions">
+          <button onClick={startNewTableOrder} disabled={!selectedTable || serviceSection !== 'tables' || submitting}><Plus size={17} /><span>New</span></button>
+          <button onClick={() => activeOrder && setShowInvoice(true)} disabled={!activeOrder}><Printer size={17} /><span>Receipt</span></button>
+          <button onClick={() => setShowPaymentLedger(true)} disabled={!activeOrder || activeOrder.status === 'voided' || cart.length > 0}><CreditCard size={17} /><span>Payment</span></button>
+          <button onClick={() => activeOrder && setShowSplitBill(true)} disabled={!canSplitBill}><CopyPlus size={17} /><span>Split</span></button>
+          <button onClick={() => activeOrder && setShowJoinBill(true)} disabled={!canJoinBill}><GitMerge size={17} /><span>Join</span></button>
+          <button onClick={() => {
+            if (!activeOrder) return
+            if (window.desktopPrinting && printableTable) setTablePrint({ table: printableTable, kind: 'bill' })
+            else setShowInvoice(true)
+          }} disabled={!activeOrder || cart.length > 0 || activeOrder.status === 'voided'}><Printer size={17} /><span>Print bill</span></button>
+          <button onClick={() => {
+            if (!activeOrder) return
+            if (window.desktopPrinting && printableTable) setTablePrint({ table: printableTable, kind: 'kot' })
+            else void openDuplicateKot()
+          }} disabled={!activeOrder || cart.length > 0 || activeOrder.status === 'paid' || activeOrder.status === 'voided'}><Printer size={17} /><span>Print KOT</span></button>
+          <button onClick={() => { if (tableViewOpen) setTableViewOpen(false); else returnToServiceSlots() }} disabled={!tableViewOpen && !deliveryOrderOpen && !parcelOrderOpen}><Check size={17} /><span>Close</span></button>
+        </nav>
       </main>
       {showInvoice && activeOrder && <InvoicePreview order={activeOrder} payment={lastPayment} onClose={() => setShowInvoice(false)} />}
       {showKitchenTicket && activeOrder && (
@@ -1459,6 +1494,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
         />
       )}
       {showSplitBill && activeOrder && <SplitBillDialog order={activeOrder} onClose={() => setShowSplitBill(false)} onSplit={handleSplitBill} />}
+      {showJoinBill && activeOrder && <JoinBillDialog order={activeOrder} candidates={joinCandidates} onClose={() => setShowJoinBill(false)} onJoin={handleJoinBills} />}
       {showDeliveryScheduleDialog && selectedDeliveryNumber !== null && (
         <DeliveryActionDialog
           reference={`HD-${selectedDeliveryNumber}`}

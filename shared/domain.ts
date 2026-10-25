@@ -1,7 +1,7 @@
 import type { BillDiscount } from './billing.js'
 
 export type OrderType = 'dine_in' | 'parcel' | 'delivery'
-export type OrderStatus = 'ordering' | 'preparing' | 'ready' | 'payment_pending' | 'paid' | 'voided'
+export type OrderStatus = 'ordering' | 'preparing' | 'ready' | 'payment_pending' | 'paid' | 'voided' | 'joined'
 export type DeliveryStatus = 'pending' | 'assigned' | 'dispatched' | 'delivered' | 'failed' | 'cancelled'
 export type RiderAvailability = 'available' | 'unavailable' | 'off_shift'
 export type TableStatus = 'available' | 'ordering' | 'preparing' | 'ready' | 'payment_pending'
@@ -126,6 +126,11 @@ export interface SplitOrderInput {
 export interface SplitOrderResult {
   source: SavedOrder
   split: SavedOrder
+}
+
+export interface JoinOrdersInput {
+  requestId: string
+  orderIds: string[]
 }
 
 export interface SavedOrder {
