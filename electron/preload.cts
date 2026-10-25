@@ -14,6 +14,9 @@ import type {
   DeliveryEvent,
   DeliveryCashHandover,
   DeliveryCashHandoverInput,
+  DeliveryFloatIssue,
+  DeliveryRunSettlement,
+  RiderRunState,
   DeliveryOperation,
   DeliveryRider,
   DeliveryRiderInput,
@@ -83,6 +86,12 @@ const api = {
     ipcRenderer.invoke('delivery:cash-handovers', riderId),
   recordDeliveryCashHandover: (input: DeliveryCashHandoverInput): Promise<DeliveryCashHandover> =>
     ipcRenderer.invoke('delivery:record-cash-handover', input),
+  getRiderRunState: (riderId: string): Promise<RiderRunState> =>
+    ipcRenderer.invoke('delivery:rider-run-state', riderId),
+  issueDeliveryFloat: (input: { requestId: string; riderId: string; amountPaise: number; notes: string }): Promise<DeliveryFloatIssue> =>
+    ipcRenderer.invoke('delivery:issue-float', input),
+  closeDeliveryRun: (input: { requestId: string; riderId: string; receivedPaise: number; notes: string }): Promise<DeliveryRunSettlement> =>
+    ipcRenderer.invoke('delivery:close-run', input),
   operateDelivery: (input: DeliveryOperation): Promise<void> =>
     ipcRenderer.invoke('delivery:operate', input),
   listDeliveryEvents: (orderId: string): Promise<DeliveryEvent[]> =>

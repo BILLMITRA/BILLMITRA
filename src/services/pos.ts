@@ -8,6 +8,9 @@ import type {
   DeliveryEvent,
   DeliveryCashHandover,
   DeliveryCashHandoverInput,
+  DeliveryFloatIssue,
+  DeliveryRunSettlement,
+  RiderRunState,
   DeliveryOperation,
   DeliveryRider,
   DeliveryRiderInput,
@@ -130,6 +133,18 @@ export function listDeliveryCashHandovers(riderId: string): Promise<DeliveryCash
 
 export function recordDeliveryCashHandover(input: DeliveryCashHandoverInput): Promise<DeliveryCashHandover> {
   return posApi.recordDeliveryCashHandover(input)
+}
+
+export function getRiderRunState(riderId: string): Promise<RiderRunState> {
+  return posApi.getRiderRunState(riderId)
+}
+
+export function issueDeliveryFloat(input: { requestId: string; riderId: string; amountPaise: number; notes: string }): Promise<DeliveryFloatIssue> {
+  return posApi.issueDeliveryFloat(input)
+}
+
+export function closeDeliveryRun(input: { requestId: string; riderId: string; receivedPaise: number; notes: string }): Promise<DeliveryRunSettlement> {
+  return posApi.closeDeliveryRun(input)
 }
 
 export function operateDelivery(input: DeliveryOperation): Promise<void> {

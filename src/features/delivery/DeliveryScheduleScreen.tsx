@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import type {
   DeliveryEvent,
-  DeliveryCashHandover,
+  RiderRunState,
   DeliveryOperation,
   DeliveryRider,
   DeliveryRiderInput,
@@ -18,11 +18,12 @@ import {
   assignDeliveryRider,
   assignDeliveryRiderBatch,
   listDeliveryEvents,
-  listDeliveryCashHandovers,
+  getRiderRunState,
+  issueDeliveryFloat,
+  closeDeliveryRun,
   listDeliveryRiders,
   listDeliverySchedule,
   operateDelivery,
-  recordDeliveryCashHandover,
   saveDeliveryRider,
   updateDeliverySchedule,
 } from '../../services/pos'
@@ -113,10 +114,12 @@ export function DeliveryScheduleScreen({
   const [settlementRiderId, setSettlementRiderId] = useState('')
   const [settlementFrom, setSettlementFrom] = useState('')
   const [settlementTo, setSettlementTo] = useState('')
-  const [cashAmounts, setCashAmounts] = useState<Record<string, string>>({})
+  const [runState, setRunState] = useState<RiderRunState | null>(null)
+  const [floatAmount, setFloatAmount] = useState('')
+  const [receivedAmount, setReceivedAmount] = useState('')
   const [handoverNotes, setHandoverNotes] = useState('')
-  const [handoverRequestId, setHandoverRequestId] = useState(() => crypto.randomUUID())
-  const [handovers, setHandovers] = useState<DeliveryCashHandover[]>([])
+  const [floatRequestId, setFloatRequestId] = useState(() => crypto.randomUUID())
+  const [closeRequestId, setCloseRequestId] = useState(() => crypto.randomUUID())
   const [handoverError, setHandoverError] = useState('')
   const [handoverNotice, setHandoverNotice] = useState('')
   const [handoverBusy, setHandoverBusy] = useState(false)
@@ -186,9 +189,9 @@ export function DeliveryScheduleScreen({
   useEffect(() => {
     if (!settlementOpen || !settlementRiderId) return
     let active = true
-    listDeliveryCashHandovers(settlementRiderId)
-      .then(rows => { if (active) setHandovers(rows) })
-      .catch(cause => { if (active) setHandoverError(cause instanceof Error ? cause.message : 'Cash handover history could not be loaded.') })
+    getRiderRunState(settlementRiderId)
+      .then(state => { if (active) setRunState(state) })
+      .catch(cause => { if (active) setHandoverError(cause instanceof Error ? cause.message : 'Rider run could not be loaded.') })
     return () => { active = false }
   }, [settlementOpen, settlementRiderId])
 
@@ -231,39 +234,49 @@ export function DeliveryScheduleScreen({
   const printEntries = entries.filter(entry => printOrderIds.includes(entry.id) && entry.paymentStatus === 'unpaid')
   const settlementRider = riders.find(rider => rider.id === settlementRiderId) ?? null
   const settlement = riderSettlementSummary(entries, settlementRiderId, settlementFrom, settlementTo)
-  const cashCandidates = settlement.bills.filter(entry => entry.deliveryStatus === 'delivered'
-    && entry.paymentStatus === 'unpaid' && entry.balancePaise > 0)
-  const invalidCash = cashCandidates.some(entry => {
-    const value = cashAmounts[entry.id] ?? ''
-    if (!value.trim()) return false
-    const amount = cashPaise(value)
-    return !Number.isFinite(amount) || amount <= 0 || amount > entry.balancePaise
-  })
-  const cashLines = cashCandidates.flatMap(entry => {
-    const amountPaise = cashPaise(cashAmounts[entry.id] ?? '')
-    return Number.isFinite(amountPaise) && amountPaise > 0 ? [{ orderId: entry.id, amountPaise }] : []
-  })
-  const cashTotalPaise = cashLines.reduce((sum, line) => sum + line.amountPaise, 0)
+  const openBillCashPaise = runState?.bills.reduce((sum, bill) => sum + bill.balancePaise, 0) ?? 0
+  const expectedReturnPaise = (runState?.outstandingFloatPaise ?? 0) + openBillCashPaise
+  const returnReady = Boolean(runState && (runState.bills.length || runState.outstandingFloatPaise)
+    && runState.bills.every(bill => bill.deliveryStatus === 'delivered'))
 
-  async function saveCashHandover(): Promise<void> {
-    if (!settlementRider || !cashLines.length || invalidCash || handoverBusy) return
+  async function issueFloat(): Promise<void> {
+    const amountPaise = cashPaise(floatAmount)
+    if (!settlementRider || !Number.isFinite(amountPaise) || amountPaise <= 0 || handoverBusy) return
     setHandoverBusy(true)
     setHandoverError('')
     setHandoverNotice('')
     try {
-      const saved = await recordDeliveryCashHandover({
-        requestId: handoverRequestId, riderId: settlementRider.id,
-        notes: handoverNotes.trim(), lines: cashLines,
-      })
-      setHandoverNotice(`${formatMoney(saved.amountPaise)} received from ${saved.riderName} for ${saved.lines.length} bill${saved.lines.length === 1 ? '' : 's'}.`)
-      setCashAmounts({})
+      const saved = await issueDeliveryFloat({ requestId: floatRequestId, riderId: settlementRider.id,
+        amountPaise, notes: handoverNotes.trim() })
+      setHandoverNotice(`${formatMoney(saved.amountPaise)} change money issued to ${saved.riderName}.`)
+      setFloatAmount('')
       setHandoverNotes('')
-      setHandoverRequestId(crypto.randomUUID())
-      await refresh(false)
-      try { setHandovers(await listDeliveryCashHandovers(settlementRider.id)) }
-      catch { setHandoverError('Cash handover was saved, but history could not refresh. Reopen this screen to review it.') }
+      setFloatRequestId(crypto.randomUUID())
+      setRunState(await getRiderRunState(settlementRider.id))
     } catch (cause) {
-      setHandoverError(`${cause instanceof Error ? cause.message : 'Cash handover could not be saved.'} Check handover history before changing amounts or retrying.`)
+      setHandoverError(`${cause instanceof Error ? cause.message : 'Change money could not be issued.'} Check the float history before retrying.`)
+    } finally {
+      setHandoverBusy(false)
+    }
+  }
+
+  async function closeRun(): Promise<void> {
+    const receivedPaise = cashPaise(receivedAmount)
+    if (!settlementRider || !returnReady || !Number.isFinite(receivedPaise) || receivedPaise !== expectedReturnPaise || handoverBusy) return
+    setHandoverBusy(true)
+    setHandoverError('')
+    setHandoverNotice('')
+    try {
+      const saved = await closeDeliveryRun({ requestId: closeRequestId, riderId: settlementRider.id,
+        receivedPaise, notes: handoverNotes.trim() })
+      setHandoverNotice(`${saved.items.length} delivered bill${saved.items.length === 1 ? '' : 's'} settled. HD cards are now clear.`)
+      setReceivedAmount('')
+      setHandoverNotes('')
+      setCloseRequestId(crypto.randomUUID())
+      setRunState(await getRiderRunState(settlementRider.id))
+      await refresh(false)
+    } catch (cause) {
+      setHandoverError(`${cause instanceof Error ? cause.message : 'Run could not be closed.'} Check settlement history before retrying.`)
     } finally {
       setHandoverBusy(false)
     }
@@ -571,33 +584,40 @@ export function DeliveryScheduleScreen({
       {settlementOpen && <div className="delivery-modal-backdrop" role="presentation">
         <section className="delivery-modal delivery-settlement-modal" role="dialog" aria-modal="true" aria-labelledby="delivery-settlement-title">
           <header><div><span className="delivery-action-icon"><Users size={19} /></span><h2 id="delivery-settlement-title">Delivery boy settlement</h2></div><button onClick={() => setSettlementOpen(false)} aria-label="Close settlement"><X size={18} /></button></header>
-          <p>Review assigned bills, record cash received per delivered bill, and keep an auditable handover history.</p>
+          <p>Select a rider to review assigned bills, issue change money, and settle the whole delivery run.</p>
           <div className="delivery-settlement-filters">
-            <label className="delivery-modal-field"><span>Staff name and number</span><select value={settlementRiderId} onChange={event => { setSettlementRiderId(event.target.value); setHandovers([]); setCashAmounts({}); setHandoverNotes(''); setHandoverRequestId(crypto.randomUUID()); setHandoverError(''); setHandoverNotice('') }} disabled={handoverBusy}><option value="">Select staff</option>{riders.map(rider => <option key={rider.id} value={rider.id}>{rider.name} · {rider.contactNumber || 'No phone'}</option>)}</select></label>
+            <label className="delivery-modal-field"><span>Staff name and number</span><select value={settlementRiderId} onChange={event => { setSettlementRiderId(event.target.value); setRunState(null); setFloatAmount(''); setReceivedAmount(''); setHandoverNotes(''); setFloatRequestId(crypto.randomUUID()); setCloseRequestId(crypto.randomUUID()); setHandoverError(''); setHandoverNotice('') }} disabled={handoverBusy}><option value="">Select staff</option>{riders.map(rider => <option key={rider.id} value={rider.id}>{rider.name} · {rider.contactNumber || 'No phone'}</option>)}</select></label>
             <label className="delivery-modal-field"><span>Assigned from</span><input type="date" value={settlementFrom} onChange={event => setSettlementFrom(event.target.value)} /></label>
             <label className="delivery-modal-field"><span>Assigned through</span><input type="date" value={settlementTo} onChange={event => setSettlementTo(event.target.value)} /></label>
           </div>
           {settlementRider && <>
             <div className="delivery-settlement-totals"><div><small>Assigned bills</small><b>{settlement.assignedCount}</b></div><div><small>Delivered</small><b>{settlement.deliveredCount}</b></div><div><small>Out now</small><b>{settlement.outForDeliveryCount}</b></div><div><small>Bill value</small><b>{formatMoney(settlement.invoicePaise)}</b></div><div><small>Recorded payments</small><b>{formatMoney(settlement.collectedPaise)}</b></div><div><small>Balance to reconcile</small><b>{formatMoney(settlement.balancePaise)}</b></div></div>
-            <p>Delivered bills with a balance: <b>{formatMoney(settlement.deliveredBalancePaise)}</b>. Confirm collection and record payment in the cashier before closing the bill.</p>
+            <p>Delivered bills with a balance: <b>{formatMoney(settlement.deliveredBalancePaise)}</b>. HD cards stay occupied until this rider run is settled.</p>
             <div className="delivery-settlement-table-wrap"><table className="delivery-settlement-table"><thead><tr><th>Bill / assigned</th><th>Customer / location</th><th>Status</th><th>Payment</th><th>Amount / balance</th></tr></thead><tbody>{settlement.bills.map(entry => <tr key={entry.id}><td><button className="delivery-order-reference" onClick={() => { setSettlementOpen(false); setSelectedOrder(entry) }}>{entry.reference}</button><small>{displayDate(entry.assignedAt)}</small></td><td>{entry.customerName || 'Customer'}<small>{entry.contactNumber || 'No phone'} · {[entry.deliveryArea, entry.deliveryLandmark, entry.deliveryAddress].filter(Boolean).join(' · ')}</small></td><td>{statusLabel(entry.deliveryStatus, entry.foodStatus)}</td><td>{entry.paymentStatus}</td><td>{formatMoney(entry.totalPaise)}<small>Balance {formatMoney(entry.balancePaise)}</small></td></tr>)}{settlement.bills.length === 0 && <tr><td colSpan={5} className="delivery-schedule-empty">No bills assigned to this staff member in this period.</td></tr>}</tbody></table></div>
             <section className="delivery-handover-section" aria-labelledby="delivery-handover-title">
-              <h3 id="delivery-handover-title">Record cash handover</h3>
-              <p>Enter only the cash this rider actually handed to the cashier. UPI and card payments remain separate.</p>
-              {cashCandidates.length ? <div className="delivery-handover-lines">{cashCandidates.map(entry => {
-                const value = cashAmounts[entry.id] ?? ''
-                const amount = cashPaise(value)
-                const invalid = value.trim() && (!Number.isFinite(amount) || amount <= 0 || amount > entry.balancePaise)
-                return <label key={entry.id} className="delivery-handover-line"><span><b>{entry.reference} · {entry.customerName || 'Customer'}</b><small>Remaining balance {formatMoney(entry.balancePaise)}</small></span><span className="delivery-handover-amount">Cash received ₹<input type="text" inputMode="decimal" value={value} onChange={event => setCashAmounts(current => ({ ...current, [entry.id]: event.target.value }))} placeholder="0.00" aria-label={`Cash received for ${entry.reference}`} aria-invalid={Boolean(invalid)} disabled={handoverBusy} /></span></label>
-              })}</div> : <p>No delivered bills with a balance in this selection.</p>}
-              <label className="delivery-modal-field"><span>Handover note (optional)</span><input value={handoverNotes} maxLength={250} onChange={event => setHandoverNotes(event.target.value)} placeholder="Cash count or discrepancy note" disabled={handoverBusy} /></label>
-              <div className="delivery-handover-confirm"><b>Total received: {formatMoney(cashTotalPaise)}</b><button onClick={() => void saveCashHandover()} disabled={!cashLines.length || invalidCash || handoverBusy}>{handoverBusy ? 'Saving…' : 'Confirm cash handover'}</button></div>
-              {invalidCash && <p role="alert" className="delivery-handover-error">Enter a positive amount no greater than that bill’s remaining balance, with at most two decimal places.</p>}
+              <h3 id="delivery-handover-title">Rider cash and run settlement</h3>
+              <p>Give the rider change money before leaving. After all deliveries are marked delivered, count the cash returned. Closing the whole run records each unpaid bill and clears its HD card.</p>
+              <div className="delivery-settlement-totals">
+                <div><small>Change money issued</small><b>{formatMoney(runState?.outstandingFloatPaise ?? 0)}</b></div>
+                <div><small>Unpaid bills</small><b>{formatMoney(openBillCashPaise)}</b></div>
+                <div><small>Expected cash return</small><b>{formatMoney(expectedReturnPaise)}</b></div>
+                <div><small>Open HD cards</small><b>{runState?.bills.length ?? 0}</b></div>
+              </div>
+              <label className="delivery-modal-field"><span>Change money to give rider (₹)</span><input type="text" inputMode="decimal" value={floatAmount} onChange={event => setFloatAmount(event.target.value)} placeholder="0.00" disabled={handoverBusy} /></label>
+              <button onClick={() => void issueFloat()} disabled={!Number.isFinite(cashPaise(floatAmount)) || cashPaise(floatAmount) <= 0 || handoverBusy}>{handoverBusy ? 'Saving…' : 'Issue change money'}</button>
+              <h4>Open bills for this rider</h4>
+              {runState?.bills.length ? <ul>{runState.bills.map(bill => <li key={bill.orderId}>{bill.reference} · {bill.deliveryStatus} · bill {formatMoney(bill.totalPaise)} · cash balance {formatMoney(bill.balancePaise)}</li>)}</ul> : <p>No open bills assigned to this rider.</p>}
+              <label className="delivery-modal-field"><span>Cash received from rider, including returned change money (₹)</span><input type="text" inputMode="decimal" value={receivedAmount} onChange={event => setReceivedAmount(event.target.value)} placeholder="0.00" disabled={handoverBusy} /></label>
+              <label className="delivery-modal-field"><span>Note (optional)</span><input value={handoverNotes} maxLength={250} onChange={event => setHandoverNotes(event.target.value)} placeholder="Cash count or run note" disabled={handoverBusy} /></label>
+              {!returnReady && Boolean(runState?.bills.length) && <p role="status">Mark every open bill delivered before closing this run.</p>}
+              {receivedAmount.trim() && Number.isFinite(cashPaise(receivedAmount)) && cashPaise(receivedAmount) !== expectedReturnPaise && <p role="alert" className="delivery-handover-error">Received cash differs from expected by {formatMoney(Math.abs(cashPaise(receivedAmount) - expectedReturnPaise))}. Recount or record any card or UPI payment before closing.</p>}
+              <div className="delivery-handover-confirm"><b>Expected return: {formatMoney(expectedReturnPaise)}</b><button onClick={() => void closeRun()} disabled={!returnReady || !receivedAmount.trim() || cashPaise(receivedAmount) !== expectedReturnPaise || handoverBusy}>{handoverBusy ? 'Closing…' : 'Close all delivered bills'}</button></div>
               {handoverError && <p role="alert" className="delivery-handover-error">{handoverError}</p>}
               {handoverNotice && <p role="status" className="delivery-handover-notice">{handoverNotice}</p>}
             </section>
-            <section className="delivery-handover-section" aria-labelledby="handover-history-title"><h3 id="handover-history-title">Cash handover history</h3>
-              {handovers.length ? <div className="delivery-handover-history">{handovers.map(record => <article key={record.id}><header><b>{displayDate(record.createdAt)} · {formatMoney(record.amountPaise)}</b><small>Cashier: {record.cashier}</small></header>{record.notes && <p>{record.notes}</p>}<ul>{record.lines.map(line => <li key={line.orderId}>{line.reference}: {formatMoney(line.amountPaise)}{line.refundedPaise > 0 ? ` · refunded ${formatMoney(line.refundedPaise)}` : ''}</li>)}</ul></article>)}</div> : <p>No cash handovers recorded for this rider yet.</p>}
+            <section className="delivery-handover-section" aria-labelledby="handover-history-title"><h3 id="handover-history-title">Run history</h3>
+              {runState?.settlements.length ? <div className="delivery-handover-history">{runState.settlements.map(record => <article key={record.id}><header><b>{displayDate(record.createdAt)} · received {formatMoney(record.receivedPaise)}</b><small>Cashier: {record.cashier}</small></header><p>Change money returned {formatMoney(record.floatPaise)} · bills collected {formatMoney(record.billsPaise)}</p>{record.notes && <p>{record.notes}</p>}<ul>{record.items.map(item => <li key={item.orderId}>{item.reference}: {formatMoney(item.totalPaise)} · cash {formatMoney(item.cashPaise)}</li>)}</ul></article>)}</div> : <p>No closed runs yet.</p>}
+              {runState?.floats.length ? <p>Change money history: {runState.floats.map(item => `${displayDate(item.createdAt)} · ${formatMoney(item.amountPaise)} ${item.settlementId ? '(returned)' : '(outstanding)'}`).join('; ')}</p> : null}
             </section>
           </>}
           <footer><button onClick={() => setSettlementOpen(false)}>Close</button><button className="primary" onClick={exportSettlement} disabled={!settlementRider || !settlement.bills.length}><Download size={14} /> Export all bills (CSV)</button></footer>

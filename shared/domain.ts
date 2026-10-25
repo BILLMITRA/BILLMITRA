@@ -264,6 +264,37 @@ export interface DeliveryCashHandover {
   lines: { orderId: string; reference: string; amountPaise: number; refundedPaise: number }[]
 }
 
+export interface DeliveryFloatIssue {
+  id: string
+  riderId: string
+  riderName: string
+  amountPaise: number
+  cashier: string
+  notes: string
+  createdAt: string
+  settlementId: string | null
+}
+
+export interface DeliveryRunSettlement {
+  id: string
+  riderId: string
+  riderName: string
+  cashier: string
+  floatPaise: number
+  billsPaise: number
+  receivedPaise: number
+  notes: string
+  createdAt: string
+  items: { orderId: string; reference: string; totalPaise: number; cashPaise: number }[]
+}
+
+export interface RiderRunState {
+  floats: DeliveryFloatIssue[]
+  outstandingFloatPaise: number
+  bills: { orderId: string; reference: string; deliveryStatus: string; totalPaise: number; balancePaise: number }[]
+  settlements: DeliveryRunSettlement[]
+}
+
 export function formatOrderReference(order: Pick<SavedOrder, 'type' | 'orderNumber' | 'deliveryNumber' | 'parcelNumber'>): string {
   return order.type === 'delivery' && order.deliveryNumber !== null
     ? `HD-${order.deliveryNumber}`

@@ -3,6 +3,7 @@ import { RestaurantManagementService } from './services/restaurantManagement.cjs
 import { PrintManagementService } from './services/printManagement.cjs'
 import { SavedTableBills } from './services/savedTableBills.cjs'
 import { DeliveryCashHandovers } from './services/deliveryCashHandovers.cjs'
+import { DeliveryRunSettlements } from './services/deliveryRunSettlements.cjs'
 import { FinancialManagementService } from './services/financialManagement.cjs'
 import { acquireDatabaseLease, DatabaseBackupService } from './services/databaseBackups.cjs'
 import { DatabaseSync } from 'node:sqlite'
@@ -589,7 +590,7 @@ export function createPosBackend(databasePath: string) {
       orderNumber: number | null; amountPaise: number | null; startedAt: string | null; status: OrderStatus | null
     }>
     const activeOrders = database.prepare(`
-      SELECT id FROM orders WHERE paid_at IS NULL AND voided_at IS NULL
+      SELECT id FROM orders WHERE (paid_at IS NULL OR (type='delivery' AND delivery_settled_at IS NULL)) AND voided_at IS NULL
         AND status IN ('ordering', 'preparing', 'ready', 'payment_pending')
       ORDER BY created_at DESC
     `).all() as Array<{ id: string }>
@@ -841,7 +842,7 @@ export function createPosBackend(databasePath: string) {
         if (deliveryNumber !== null) {
           const occupiedSlot = database.prepare(`
             SELECT id FROM orders WHERE type = 'delivery' AND delivery_number = ?
-              AND paid_at IS NULL AND voided_at IS NULL
+              AND delivery_settled_at IS NULL AND voided_at IS NULL
           `).get(deliveryNumber)
           if (occupiedSlot) throw new Error(`HD-${deliveryNumber} is already in use. Select another delivery slot.`)
         }
@@ -986,9 +987,14 @@ export function createPosBackend(databasePath: string) {
   savedTableBills.migrate()
   const deliveryCashHandovers = new DeliveryCashHandovers(database, action => withTransaction(database, action), financial)
   deliveryCashHandovers.migrate()
+  const deliveryRunSettlements = new DeliveryRunSettlements(database, action => withTransaction(database, action), financial)
+  deliveryRunSettlements.migrate()
   register('waiter:save-bill', (event, input) => savedTableBills.save(requireStaffPermission(event, 'waiter:operate'), input))
   register('delivery:cash-handovers', (event, riderId) => deliveryCashHandovers.list(requireStaffPermission(event, 'delivery:view'), riderId))
   register('delivery:record-cash-handover', (event, input) => deliveryCashHandovers.record(requireStaffPermission(event, 'payments:record'), input))
+  register('delivery:rider-run-state', (event, riderId) => deliveryRunSettlements.state(requireStaffPermission(event, 'delivery:view'), riderId))
+  register('delivery:issue-float', (event, input) => deliveryRunSettlements.issue(requireStaffPermission(event, 'payments:record'), input))
+  register('delivery:close-run', (event, input) => deliveryRunSettlements.close(requireStaffPermission(event, 'payments:record'), input))
   const printerActor = (event: RequestContext) => {
     const staff = getStaffAccessState(event).staff
     if (!staff) throw new Error('Sign in to operate desktop printers.')

@@ -13,6 +13,9 @@ import type {
   DeliveryEvent,
   DeliveryCashHandover,
   DeliveryCashHandoverInput,
+  DeliveryFloatIssue,
+  DeliveryRunSettlement,
+  RiderRunState,
   DeliveryOperation,
   DeliveryRider,
   DeliveryRiderInput,
@@ -74,6 +77,9 @@ declare global {
       listDeliveryEvents: (orderId: string) => Promise<DeliveryEvent[]>
       listDeliveryCashHandovers: (riderId: string) => Promise<DeliveryCashHandover[]>
       recordDeliveryCashHandover: (input: DeliveryCashHandoverInput) => Promise<DeliveryCashHandover>
+      getRiderRunState: (riderId: string) => Promise<RiderRunState>
+      issueDeliveryFloat: (input: { requestId: string; riderId: string; amountPaise: number; notes: string }) => Promise<DeliveryFloatIssue>
+      closeDeliveryRun: (input: { requestId: string; riderId: string; receivedPaise: number; notes: string }) => Promise<DeliveryRunSettlement>
     }
   }
 }

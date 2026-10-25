@@ -86,11 +86,12 @@ export class RestaurantManagementService {
   }
 
   cashSummary(): CashSummary {
-    const last = this.db.prepare('SELECT payment_cutoff, refund_cutoff FROM cash_closes ORDER BY rowid DESC LIMIT 1').get() as { payment_cutoff: number; refund_cutoff: number } | undefined
+    const last = this.db.prepare('SELECT payment_cutoff, refund_cutoff, movement_cutoff FROM cash_closes ORDER BY rowid DESC LIMIT 1').get() as { payment_cutoff: number; refund_cutoff: number; movement_cutoff: number } | undefined
     const receipts = this.db.prepare("SELECT COALESCE(SUM(amount_paise),0) AS amount FROM payment_tenders WHERE rowid > ? AND method = 'cash'").get(last?.payment_cutoff ?? 0) as { amount: number }
     const refunds = this.db.prepare(`SELECT COALESCE(SUM(r.amount_paise),0) AS amount FROM payment_refunds r
       JOIN payment_tenders t ON t.id = r.tender_id WHERE r.rowid > ? AND t.method = 'cash'`).get(last?.refund_cutoff ?? 0) as { amount: number }
-    return { receiptsPaise: receipts.amount - refunds.amount, lastClose: this.db.prepare(`SELECT id, opening_paise AS openingPaise,
+    const movements = this.db.prepare('SELECT COALESCE(SUM(amount_paise),0) AS amount FROM delivery_cash_movements WHERE rowid > ?').get(last?.movement_cutoff ?? 0) as { amount: number }
+    return { receiptsPaise: receipts.amount - refunds.amount + movements.amount, lastClose: this.db.prepare(`SELECT id, opening_paise AS openingPaise,
       receipts_paise AS receiptsPaise, expected_paise AS expectedPaise, counted_paise AS countedPaise,
       variance_paise AS variancePaise, notes, actor, created_at AS createdAt FROM cash_closes ORDER BY rowid DESC LIMIT 1`).get() as unknown as CashClose | undefined ?? null }
   }
@@ -109,12 +110,13 @@ export class RestaurantManagementService {
       const receipts = this.cashSummary().receiptsPaise
       const cutoff = (this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS value FROM payment_tenders').get() as { value: number }).value
       const refundCutoff = (this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS value FROM payment_refunds').get() as { value: number }).value
+      const movementCutoff = (this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS value FROM delivery_cash_movements').get() as { value: number }).value
       const expected = input.openingPaise + receipts
       if (input.countedPaise !== expected && input.notes.length < 3) throw new Error('Explain the cash variance before closing.')
       const closeId = randomUUID()
       this.db.prepare(`INSERT INTO cash_closes(id, request_id, payment_cutoff, opening_paise, receipts_paise,
-        expected_paise, counted_paise, variance_paise, notes, actor, refund_cutoff) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(closeId,
-        input.requestId, cutoff, input.openingPaise, receipts, expected, input.countedPaise, input.countedPaise - expected, input.notes, actor.username, refundCutoff)
+        expected_paise, counted_paise, variance_paise, notes, actor, refund_cutoff, movement_cutoff) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closeId,
+        input.requestId, cutoff, input.openingPaise, receipts, expected, input.countedPaise, input.countedPaise - expected, input.notes, actor.username, refundCutoff, movementCutoff)
       this.audit(actor, 'cash.closed', closeId, { ...input, receiptsPaise: receipts, expectedPaise: expected })
       return this.cashSummary().lastClose!
     })
