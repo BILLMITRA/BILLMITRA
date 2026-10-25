@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Armchair, ArrowDownRight, ArrowLeft, ArrowUpRight, CalendarClock, Check, ChevronDown, Coffee,
-  Ban, CreditCard, Flame, History, Minus, Plus, Printer, Search, ShieldCheck, ShoppingBag,
+  Ban, CopyPlus, CreditCard, Flame, History, Minus, Plus, Printer, Search, ShieldCheck, ShoppingBag,
   Soup, Sparkles, Trash2, Truck, Users, UtensilsCrossed, Wallet, LogOut,
 } from 'lucide-react'
 import type {
@@ -21,10 +21,10 @@ import type {
 import { DELIVERY_SLOT_COUNT, PARCEL_SLOT_COUNT, formatOrderReference } from '../../shared/domain'
 import { staffHasPermission } from '../../shared/staffPermissions'
 import { RestaurantTableCard } from '../components/RestaurantTableCard'
-import { calculateTotals, formatMoney, InvoicePreview, parseDiscountInput, type DiscountMode } from '../features/billing'
+import { calculateTotals, formatMoney, InvoicePreview, SplitBillDialog, parseDiscountInput, type DiscountMode } from '../features/billing'
 import { BillHistoryDialog } from '../features/payments'
 import { SavedBillsDialog } from '../features/payments/SavedBillsDialog'
-import { createOrder, getOrder, getStaffAccessState, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, recordDuplicateKotRequest, recordPayment, setManagerPin, updateDeliverySchedule, voidOrder, voidOrderItem } from '../services/pos'
+import { createOrder, getOrder, getStaffAccessState, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, recordDuplicateKotRequest, recordPayment, setManagerPin, splitOrder, updateDeliverySchedule, voidOrder, voidOrderItem } from '../services/pos'
 import { ManagerActionDialog } from '../features/security/ManagerActionDialog'
 import { ItemVoidDialog } from '../features/security/ItemVoidDialog'
 import { KitchenTicketPreview } from '../features/kitchen/KitchenTicketPreview'
@@ -90,6 +90,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [hasManagerPin, setHasManagerPin] = useState(false)
   const [managerDialogMode, setManagerDialogMode] = useState<ManagerDialogMode | null>(null)
   const [showItemVoid, setShowItemVoid] = useState(false)
+  const [showSplitBill, setShowSplitBill] = useState(false)
   const [categoryId, setCategoryId] = useState('all')
   const [search, setSearch] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -316,6 +317,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const canVoidBill = Boolean(activeOrder && activeOrder.status !== 'paid' && activeOrder.status !== 'voided'
     && canVoidBills && hasManagerPin && cart.length === 0 && !discountChanged && !deliveryDetailsChanged && !submitting && !failedSubmission)
   const canVoidItem = Boolean(canVoidBill && activeOrder && activeOrder.items.length > 0)
+  const canSplitBill = Boolean(activeOrder && activeOrder.type === 'dine_in' && !activeOrder.savedAt
+    && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && activeOrder.items.reduce((total, item) => total + item.quantity, 0) > 1
+    && cart.length === 0 && !discountChanged && !submitting && !failedSubmission)
   const itemCount = existingLines.reduce((count, item) => count + item.quantity, 0)
     + cart.reduce((count, item) => count + item.quantity, 0)
 
@@ -630,6 +634,16 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The item was voided but the screen could not refresh.')
     }
+  }
+
+  async function handleSplitBill(input: import('../../shared/domain').SplitOrderInput): Promise<void> {
+    const result = await splitOrder(input)
+    setActiveOrder(result.split)
+    setShowSplitBill(false)
+    setLastPayment(null)
+    setSavedMessage(`Bill #${result.source.orderNumber} split into new bill #${result.split.orderNumber}.`)
+    try { await refreshMenu() }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'The bills were split but the table could not refresh.') }
   }
 
   async function openDuplicateKot(): Promise<void> {
@@ -1268,6 +1282,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               <button className="right-action danger" onClick={() => setShowItemVoid(true)} disabled={!canVoidItem} title={!canVoidItem ? 'Select an unpaid saved bill with items; save or clear changes first' : 'Void one item or part of an item quantity'}>
                 <Ban size={15} />Void item
               </button>
+              <button className="right-action" onClick={() => setShowSplitBill(true)} disabled={!canSplitBill} title={!canSplitBill ? 'Select an unpaid dine-in bill with two or more items and no unsaved changes' : 'Move selected quantities to a new independent bill'}>
+                <CopyPlus size={15} />Split bill
+              </button>
               {!hasManagerPin && canManageSettings && <button className="right-action security-setup" onClick={() => setManagerDialogMode('setup')}><ShieldCheck size={15} />Set manager PIN</button>}
               <button className="right-action unavailable" disabled title="Staff calling is available when the waiter module is implemented">Call staff</button>
               <button className="right-action" onClick={() => {
@@ -1441,6 +1458,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           onVoid={handleVoidItem}
         />
       )}
+      {showSplitBill && activeOrder && <SplitBillDialog order={activeOrder} onClose={() => setShowSplitBill(false)} onSplit={handleSplitBill} />}
       {showDeliveryScheduleDialog && selectedDeliveryNumber !== null && (
         <DeliveryActionDialog
           reference={`HD-${selectedDeliveryNumber}`}

@@ -117,6 +117,17 @@ export interface CreateOrderInput {
   orderId?: string
 }
 
+export interface SplitOrderInput {
+  requestId: string
+  orderId: string
+  items: Array<{ itemId: string; quantity: number }>
+}
+
+export interface SplitOrderResult {
+  source: SavedOrder
+  split: SavedOrder
+}
+
 export interface SavedOrder {
   savedAt?: string | null
   savedBy?: string | null

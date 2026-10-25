@@ -55,6 +55,7 @@ export const browserPos: Window['pos'] = {
   setManagerPin: (input) => invoke('setManagerPin', input),
   voidOrder: (input) => invoke('voidOrder', input),
   voidOrderItem: (input) => invoke('voidOrderItem', input),
+  splitOrder: (input) => invoke('splitOrder', input),
   recordDuplicateKotRequest: (input) => invoke('recordDuplicateKotRequest', input),
   listDeliverySchedule: () => invoke('listDeliverySchedule'),
   findSavedDeliveryCustomer: (input) => invoke('findSavedDeliveryCustomer', input),

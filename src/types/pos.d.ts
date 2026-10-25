@@ -22,6 +22,8 @@ import type {
   DeliveryScheduleEntry,
   DeliveryScheduleInput,
   SavedDeliveryCustomerDetails,
+  SplitOrderInput,
+  SplitOrderResult,
 } from '../../shared/domain'
 import type { CategoryInput, ProductInput, MenuCatalog, SalesReportInput, SalesReport } from '../../shared/restaurant'
 import type { Category, Product } from '../../shared/domain'
@@ -66,6 +68,7 @@ declare global {
       setManagerPin: (pin: string) => Promise<void>
       voidOrder: (input: { orderId: string; pin: string; reason: string }) => Promise<SavedOrder>
       voidOrderItem: (input: { orderId: string; itemId: string; quantity: number; pin: string; reason: string }) => Promise<SavedOrder>
+      splitOrder: (input: SplitOrderInput) => Promise<SplitOrderResult>
       recordDuplicateKotRequest: (orderId: string) => Promise<void>
       listDeliverySchedule: () => Promise<DeliveryScheduleEntry[]>
       findSavedDeliveryCustomer: (contactNumber: string) => Promise<SavedDeliveryCustomerDetails | null>

@@ -28,6 +28,8 @@ import type {
   StaffAccessState,
   StaffIdentity,
   StaffPermission,
+  SplitOrderInput,
+  SplitOrderResult,
 } from '../shared/domain.js'
 
 type RequestContext = { sender: { id: number } }
@@ -101,6 +103,11 @@ export function createPosBackend(databasePath: string) {
     quantity: z.number().int().min(1).max(99),
     pin: managerPinSchema,
     reason: z.string().trim().min(3).max(250),
+  })
+  const splitOrderSchema = z.object({
+    requestId: z.string().uuid(),
+    orderId: z.string().uuid(),
+    items: z.array(z.object({ itemId: z.string().uuid(), quantity: z.number().int().min(1).max(99) })).min(1).max(100),
   })
   const database = new DatabaseSync(databasePath)
   closeOnFailure = () => database.close()
@@ -774,6 +781,89 @@ export function createPosBackend(databasePath: string) {
     return outcome.order
   }
 
+  function splitOrder(rawInput: unknown, actor: StaffIdentity): SplitOrderResult {
+    const input: SplitOrderInput = splitOrderSchema.parse(rawInput)
+    return withTransaction(database, () => {
+      const prior = database.prepare('SELECT source_order_id AS sourceOrderId, split_order_id AS splitOrderId FROM order_splits WHERE request_id=?').get(input.requestId) as { sourceOrderId: string; splitOrderId: string } | undefined
+      if (prior) {
+        const source = orderFromRow(prior.sourceOrderId); const split = orderFromRow(prior.splitOrderId)
+        if (!source || !split) throw new Error('The previously split bills could not be loaded.')
+        return { source, split }
+      }
+      const source = orderFromRow(input.orderId)
+      if (!source || source.type !== 'dine_in' || !source.tableId || source.savedAt || !orderStatusValues.includes(source.status)) {
+        throw new Error('Select an unpaid active dine-in bill to split.')
+      }
+      if (financial.hasUnrefundedPayments(source.id)) throw new Error('Refund collected payments before splitting this bill.')
+      const requested = new Map<string, number>()
+      for (const line of input.items) {
+        if (requested.has(line.itemId)) throw new Error('Select each bill item only once.')
+        requested.set(line.itemId, line.quantity)
+      }
+      const sourceLines = source.items.map(item => ({ ...item }))
+      const splitLines = sourceLines.flatMap(item => {
+        const quantity = requested.get(item.id)
+        if (!quantity) return []
+        if (quantity > item.quantity) throw new Error(`Cannot split more than ${item.quantity} of ${item.productName}.`)
+        return [{ ...item, quantity }]
+      })
+      if (splitLines.length !== requested.size) throw new Error('One or more selected items are no longer on this bill. Refresh and retry.')
+      const remainingLines = sourceLines.flatMap(item => {
+        const moved = requested.get(item.id) ?? 0
+        return item.quantity > moved ? [{ ...item, quantity: item.quantity - moved }] : []
+      })
+      if (!remainingLines.length) throw new Error('Leave at least one item on the original bill. Use a new bill instead.')
+      const sourceSubtotal = sourceLines.reduce((sum, item) => sum + item.unitPricePaise * item.quantity, 0)
+      const splitSubtotal = splitLines.reduce((sum, item) => sum + item.unitPricePaise * item.quantity, 0)
+      const splitDiscount: BillDiscount | null = source.discount?.kind === 'percentage'
+        ? source.discount
+        : source.discount?.kind === 'fixed'
+          ? { kind: 'fixed', valuePaise: Math.floor(source.discount.valuePaise * splitSubtotal / sourceSubtotal) }
+          : null
+      const sourceDiscount: BillDiscount | null = source.discount?.kind === 'percentage'
+        ? source.discount
+        : source.discount?.kind === 'fixed'
+          ? { kind: 'fixed', valuePaise: source.discount.valuePaise - (splitDiscount?.kind === 'fixed' ? splitDiscount.valuePaise : 0) }
+          : null
+      const sourceTotals = calculateTotals(remainingLines, sourceDiscount)
+      const splitTotals = calculateTotals(splitLines, splitDiscount)
+      const splitId = randomUUID()
+      const displayNumber = (database.prepare('SELECT COALESCE(MAX(display_number), 0) + 1 AS next FROM orders').get() as { next: number }).next
+      const discountFields = (discount: BillDiscount | null, totals: ReturnType<typeof calculateTotals>) => [
+        totals.subtotalPaise, totals.taxPaise, totals.totalPaise,
+        discount?.kind ?? 'none', discount?.kind === 'percentage' ? discount.valueBps : discount?.kind === 'fixed' ? discount.valuePaise : 0,
+        totals.discountPaise,
+      ]
+      database.prepare(`INSERT INTO orders (id, display_number, type, status, table_id, customer_name, delivery_address,
+        request_id, subtotal_paise, tax_paise, total_paise, discount_kind, discount_value, discount_paise)
+        VALUES (?, ?, 'dine_in', ?, ?, '', '', ?, ?, ?, ?, ?, ?, ?)`)
+        .run(splitId, displayNumber, source.status, source.tableId, input.requestId, ...discountFields(splitDiscount, splitTotals))
+      const insertItem = database.prepare(`INSERT INTO order_items (id, order_id, product_id, product_name, unit_price_paise, tax_rate_bps, quantity, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      for (const item of splitLines) insertItem.run(randomUUID(), splitId, item.productId, item.productName, item.unitPricePaise, item.taxRateBps, item.quantity, item.note)
+      const updateQuantity = database.prepare('UPDATE order_items SET quantity=? WHERE id=? AND order_id=?')
+      const deleteItem = database.prepare('DELETE FROM order_items WHERE id=? AND order_id=?')
+      for (const item of sourceLines) {
+        const moved = requested.get(item.id) ?? 0
+        if (!moved) continue
+        if (moved === item.quantity) deleteItem.run(item.id, source.id)
+        else updateQuantity.run(item.quantity - moved, item.id, source.id)
+      }
+      database.prepare(`UPDATE orders SET subtotal_paise=?, tax_paise=?, total_paise=?, discount_kind=?, discount_value=?, discount_paise=? WHERE id=?`)
+        .run(...discountFields(sourceDiscount, sourceTotals), source.id)
+      database.prepare(`INSERT INTO order_splits(id, request_id, source_order_id, split_order_id, actor)
+        VALUES (?, ?, ?, ?, ?)`)
+        .run(randomUUID(), input.requestId, source.id, splitId, actor.username)
+      database.prepare(`INSERT INTO audit_log(id, action, entity_type, entity_id, actor, reason, details_json) VALUES
+        (?, 'order.split', 'order', ?, ?, 'split_bill', ?), (?, 'order.split_from', 'order', ?, ?, 'split_bill', ?)`)
+        .run(randomUUID(), splitId, actor.username, JSON.stringify({ sourceOrderId: source.id, items: splitLines.map(item => ({ itemId: item.id, quantity: item.quantity })) }),
+          randomUUID(), source.id, actor.username, JSON.stringify({ splitOrderId: splitId }))
+      const updatedSource = orderFromRow(source.id); const split = orderFromRow(splitId)
+      if (!updatedSource || !split) throw new Error('Split bills could not be loaded after saving.')
+      return { source: updatedSource, split }
+    })
+  }
+
   function recordDuplicateKotRequest(rawOrderId: unknown, actor: StaffIdentity): void {
     const orderId = z.string().uuid().parse(rawOrderId)
     withTransaction(database, () => {
@@ -1067,6 +1157,15 @@ export function createPosBackend(databasePath: string) {
           AND status IN ('ordering','preparing','ready','payment_pending');
       INSERT INTO schema_migrations(version) VALUES(21);`)
   })
+  withTransaction(database, () => {
+    if (database.prepare('SELECT version FROM schema_migrations WHERE version=22').get()) return
+    database.exec(`CREATE TABLE order_splits (
+      id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE,
+      source_order_id TEXT NOT NULL REFERENCES orders(id), split_order_id TEXT NOT NULL UNIQUE REFERENCES orders(id),
+      actor TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT(datetime('now'))
+    ); CREATE INDEX order_splits_source ON order_splits(source_order_id, created_at DESC);
+    INSERT INTO schema_migrations(version) VALUES(22);`)
+  })
   register('waiter:save-bill', (event, input) => savedTableBills.save(requireStaffPermission(event, 'waiter:operate'), input))
   register('delivery:cash-handovers', (event, riderId) => deliveryCashHandovers.list(requireStaffPermission(event, 'delivery:view'), riderId))
   register('delivery:record-cash-handover', (event, input) => deliveryCashHandovers.record(requireStaffPermission(event, 'payments:record'), input))
@@ -1095,6 +1194,7 @@ export function createPosBackend(databasePath: string) {
     return printing.list().filter(job => actor.role !== 'kitchen' || job.kind === 'kot')
   })
   register('payments:ledger', (event, input) => { requireStaffPermission(event, 'pos:access'); return financial.ledger(input) })
+  register('pos:split-order', (event, input) => splitOrder(input, requireStaffPermission(event, 'orders:write')))
   register('payments:collect', (event, input) => financial.collect(requireStaffPermission(event, 'payments:record'), input))
   register('payments:refund', (event, input) => financial.refund(requireStaffPermission(event, 'payments:refund'), input))
   register('inventory:list', event => { requireStaffPermission(event, 'inventory:manage'); return restaurant.inventory() })

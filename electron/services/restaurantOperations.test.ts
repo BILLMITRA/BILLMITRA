@@ -134,6 +134,26 @@ describe('restaurant operations', () => {
     expect(refreshed.tables.find(item => item.id === table.id)).toMatchObject({ activeOrderCount: 2 })
   })
 
+  it('splits selected dine-in quantities into an independently payable bill', () => {
+    const menu = invoke<import('../../shared/domain').MenuData>('pos:load-menu')
+    const [first, second] = menu.products.filter(item => item.available)
+    const source = invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'dine_in', tableId: menu.tables[0].id, customerName: '', deliveryAddress: '',
+      discount: { kind: 'fixed', valuePaise: 300 },
+      items: [{ productId: first.id, quantity: 3, note: '' }, { productId: second.id, quantity: 1, note: '' }],
+    })
+    const firstLine = source.items.find(item => item.productId === first.id)!
+    const requestId = randomUUID()
+    const result = invoke<import('../../shared/domain').SplitOrderResult>('pos:split-order', { requestId, orderId: source.id, items: [{ itemId: firstLine.id, quantity: 2 }] })
+    expect(result.source.id).toBe(source.id)
+    expect(result.source.items.find(item => item.id === firstLine.id)?.quantity).toBe(1)
+    expect(result.split.tableId).toBe(source.tableId)
+    expect(result.split.items).toMatchObject([{ productId: first.id, quantity: 2 }])
+    expect(result.source.discountPaise + result.split.discountPaise).toBe(source.discountPaise)
+    expect(invoke<import('../../shared/domain').SplitOrderResult>('pos:split-order', { requestId, orderId: source.id, items: [{ itemId: firstLine.id, quantity: 2 }] })).toEqual(result)
+    expect(() => invoke('pos:split-order', { requestId: randomUUID(), orderId: result.source.id, items: result.source.items.map(item => ({ itemId: item.id, quantity: item.quantity })) })).toThrow('Leave at least one item')
+  })
+
   it('caps refunds at the original tender, keeps the invoice paid, and reconciles cash/report totals', () => {
     const { saved } = createBill()
     const ledger = invoke<PaymentLedger>('payments:collect', { requestId: randomUUID(), orderId: saved.id, method: 'cash', amountPaise: saved.totalPaise })

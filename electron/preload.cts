@@ -23,6 +23,8 @@ import type {
   DeliveryScheduleEntry,
   DeliveryScheduleInput,
   SavedDeliveryCustomerDetails,
+  SplitOrderInput,
+  SplitOrderResult,
 } from '../shared/domain.js'
 
 const api = {
@@ -68,6 +70,8 @@ const api = {
     ipcRenderer.invoke('pos:void-order', input),
   voidOrderItem: (input: { orderId: string; itemId: string; quantity: number; pin: string; reason: string }): Promise<SavedOrder> =>
     ipcRenderer.invoke('pos:void-order-item', input),
+  splitOrder: (input: SplitOrderInput): Promise<SplitOrderResult> =>
+    ipcRenderer.invoke('pos:split-order', input),
   recordDuplicateKotRequest: (orderId: string): Promise<void> =>
     ipcRenderer.invoke('pos:record-duplicate-kot-request', orderId),
   listDeliverySchedule: (): Promise<DeliveryScheduleEntry[]> =>

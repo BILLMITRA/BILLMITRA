@@ -1,5 +1,6 @@
 export { calculateTotals, formatMoney } from '../../../shared/billing'
 export type { BillDiscount, BillLine, BillTotals } from '../../../shared/billing'
 export { InvoicePreview } from './InvoicePreview'
+export { SplitBillDialog } from './SplitBillDialog'
 export { parseDiscountInput } from './discountInput'
 export type { DiscountMode, ParsedDiscount } from './discountInput'
