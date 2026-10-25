@@ -326,6 +326,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     && cart.length === 0 && !discountChanged && !submitting && !failedSubmission)
   const canJoinBill = Boolean(activeOrder && activeOrder.type === 'dine_in' && !activeOrder.savedAt && joinCandidates.length
     && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && cart.length === 0 && !discountChanged && !submitting && !failedSubmission)
+  const orderEditorOpen = tableViewOpen || deliveryOrderOpen || parcelOrderOpen
   const itemCount = existingLines.reduce((count, item) => count + item.quantity, 0)
     + cart.reduce((count, item) => count + item.quantity, 0)
 
@@ -1083,7 +1084,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           </div>
         </header>
 
-        <div className="workspace">
+        <div className={`workspace ${orderEditorOpen ? 'order-editor-open' : 'service-board-open'}`}>
           <section className={`catalog-panel ${tableViewOpen || deliveryOrderOpen || parcelOrderOpen ? 'table-order-catalog' : serviceSection === 'delivery' || serviceSection === 'parcel' ? 'delivery-slot-catalog' : ''}`}>
             {!!savedBills.length && <div className="alert success-alert" role="status"><span>{savedBills.length} bill{savedBills.length === 1 ? '' : 's'} saved by waiters. Payment still due.</span><button onClick={() => setShowSavedBills(true)}>View Saved Bills</button></div>}
             {activeOrder?.savedAt && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && <div className="alert success-alert"><span>Saved bill #{activeOrder.orderNumber} · Former table {activeOrder.savedTableName} · {activeOrder.savedTableFloor} · Saved by {activeOrder.savedBy}. Review the items and record payment to close this bill.</span></div>}
@@ -1198,7 +1199,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               </section>
             )}
 
-            {(serviceSection === 'tables' || serviceSection === 'parcel' && parcelOrderOpen || serviceSection === 'delivery' && deliveryOrderOpen) && <div className={`menu-selector ${tableViewOpen || deliveryOrderOpen || parcelOrderOpen ? 'table-order-menu' : ''}`}>
+            {orderEditorOpen && <div className={`menu-selector table-order-menu`}>
               {(deliveryOrderOpen || parcelOrderOpen) && <div className="delivery-menu-context"><button className="back-to-delivery-slots" onClick={returnToServiceSlots}><ArrowLeft size={14} />All {deliveryOrderOpen ? 'HD' : 'P'} slots</button><span><b>{deliveryOrderOpen ? `HD-${selectedDeliveryNumber}` : `P-${selectedParcelNumber}`}</b><small>{deliveryOrderOpen ? 'Home delivery order' : 'Takeaway order'}</small></span></div>}
               {tableViewOpen && selectedTableData && <div className="table-orders-context">
                 <div><button className="back-to-tables" onClick={() => setTableViewOpen(false)}><ArrowLeft size={14} />Tables</button><span><b>Table {selectedTableData.name}</b><small>{selectedTableData.floor} · {selectedTableOrders.length} active bill{selectedTableOrders.length === 1 ? '' : 's'}</small></span></div>
@@ -1233,7 +1234,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             <footer className="catalog-footer"><span><span className={`online-dot ${menu ? '' : 'offline'}`} />{menu ? 'Menu ready' : 'Menu unavailable'}</span><span>Prices in INR · GST rates are demo configuration</span><span>Find items from the bill panel</span></footer>
           </section>
 
-          <aside className={`order-panel ${serviceSection === 'delivery' ? 'delivery-order-panel' : ''}`}>
+          {orderEditorOpen && <aside className={`order-panel ${serviceSection === 'delivery' ? 'delivery-order-panel' : ''}`}>
             <div className="order-panel-heading">
               <div><div className="eyebrow">CURRENT BILL</div><h2>{activeOrder ? `Order ${formatOrderReference(activeOrder)}` : orderType === 'delivery' ? 'New delivery' : orderType === 'parcel' ? 'New takeaway' : 'New order'}</h2></div>
               <div className="bill-header-actions">
@@ -1459,7 +1460,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                 </button>
               </div>
             )}
-          </aside>
+          </aside>}
         </div>
         <nav className="pos-action-bar" aria-label="POS quick actions">
           <button onClick={startNewTableOrder} disabled={!selectedTable || serviceSection !== 'tables' || submitting}><Plus size={17} /><span>New</span></button>

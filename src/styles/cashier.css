@@ -50,6 +50,9 @@
 .top-avatar { width: 29px; height: 29px; border: 0; cursor: pointer; }
 .workspace { height: 0; flex: 1; min-height: 0; display: flex; overflow: hidden; }
 .catalog-panel { padding: 26px 26px 13px; flex: 1; min-width: 0; overflow-y: auto; }
+.workspace.service-board-open .catalog-panel { width: 100%; flex: 1 1 100%; padding-right: 34px; padding-left: 34px; }
+.workspace.service-board-open .delivery-slot-board { max-width: none; }
+.workspace.service-board-open .delivery-slot-grid { grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); }
 .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 22px; }
 .eyebrow { color: #87928a; font-size: 8px; line-height: 12px; font-weight: 700; letter-spacing: 1.3px; }
 .page-heading h1 { margin: 4px 0 4px; font: 800 24px/31px 'Manrope', sans-serif; letter-spacing: -.7px; color: #24332a; }
