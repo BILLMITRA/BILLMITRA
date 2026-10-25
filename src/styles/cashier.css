@@ -235,7 +235,8 @@
 .payment-confirmed small { color: #748179; font-size: 8px; }
 .payment-receipt-button { min-height: 28px; border: 1px solid #d9e9dd; border-radius: 6px; background: #f2faf4; color: #286f4c; font-size: 8px; font-weight: 700; cursor: pointer; }
 .payment-box.settled { border-color: #d8eade; background: #f5fbf6; }
-.pos-action-bar { position: fixed; z-index: 18; left: 250px; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(8, minmax(88px, 1fr)); gap: 1px; padding: 8px 16px; border-top: 1px solid #c9decf; background: #f3faf4; box-shadow: 0 -5px 18px #16322414; }
+.pos-action-bar { position: fixed; z-index: 18; left: 250px; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(9, minmax(88px, 1fr)); gap: 1px; padding: 8px 16px; border-top: 1px solid #c9decf; background: #f3faf4; box-shadow: 0 -5px 18px #16322414; }
+.recall-bill-row{width:100%;border:0;background:transparent;text-align:left;cursor:pointer}.recall-bill-row:hover{background:#f3faf4}.recall-bill-row strong{color:#256e49;font-size:12px}
 .pos-action-bar button { min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px solid #bfdbc7; background: #fff; color: #276e4a; font-size: 10px; font-weight: 700; cursor: pointer; }
 .pos-action-bar button:hover:not(:disabled) { background: #e8f6eb; }
 .pos-action-bar button:disabled { color: #aab9ae; background: #fafcfb; cursor: not-allowed; }
