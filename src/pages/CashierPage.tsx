@@ -237,7 +237,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     ? (menu?.activeOrders ?? []).filter((order) => order.type === 'dine_in' && order.tableId === selectedTable && !order.savedAt)
     : [], [menu, selectedTable])
   const joinCandidates = useMemo(() => (menu?.activeOrders ?? []).filter(order => order.type === 'dine_in' && !order.savedAt && order.id !== activeOrder?.id), [menu, activeOrder?.id])
-  const recallableBills = useMemo(() => (menu?.activeOrders ?? []).filter(order => order.type === 'dine_in' && !order.savedAt), [menu])
+  const recallableBills = useMemo(() => (menu?.activeOrders ?? []).filter(order => !order.savedAt), [menu])
   const savedBills = (menu?.activeOrders ?? []).filter(order => Boolean(order.savedAt))
   const printableTable = activeOrder?.type === 'dine_in' && activeOrder.tableId
     ? (() => {
@@ -411,6 +411,16 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
 
   function recallBill(order: SavedOrder): void {
     if (cart.length > 0 && !window.confirm('Discard unsaved items and recall this bill?')) return
+    if (order.type === 'delivery' && order.deliveryNumber !== null) {
+      chooseDeliverySlot(order.deliveryNumber)
+      setShowRecallBill(false)
+      return
+    }
+    if (order.type === 'parcel' && order.parcelNumber !== null) {
+      chooseParcelSlot(order.parcelNumber)
+      setShowRecallBill(false)
+      return
+    }
     const table = menu?.tables.find(item => item.id === order.tableId)
     if (!table) { setError('This bill no longer has an available table. Refresh and try again.'); return }
     setSelectedTable(table.id)
@@ -1317,7 +1327,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               <button className="right-action" onClick={() => setShowJoinBill(true)} disabled={!canJoinBill} title={!canJoinBill ? 'Open an unpaid dine-in bill and keep another active dine-in bill available' : 'Combine this bill with another active dine-in bill'}>
                 <GitMerge size={15} />Join bills
               </button>
-              <button className="right-action" onClick={() => setShowRecallBill(true)} disabled={!recallableBills.length} title="Open an active dine-in bill for editing">
+              <button className="right-action" onClick={() => setShowRecallBill(true)} disabled={!recallableBills.length} title="Open an active dine-in, takeaway, or delivery bill for editing">
                 <Search size={15} />Recall bill
               </button>
               {!hasManagerPin && canManageSettings && <button className="right-action security-setup" onClick={() => setManagerDialogMode('setup')}><ShieldCheck size={15} />Set manager PIN</button>}
