@@ -72,6 +72,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [showDeliveryScheduleDialog, setShowDeliveryScheduleDialog] = useState(false)
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
   const [activeOrder, setActiveOrder] = useState<SavedOrder | null>(null)
+  const [previewOrder, setPreviewOrder] = useState<SavedOrder | null>(null)
   const [lastPayment, setLastPayment] = useState<PaymentRecord | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash')
   const [paymentSubmitting, setPaymentSubmitting] = useState(false)
@@ -343,6 +344,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setAssignedDeliveryTo('')
     setShowDeliveryScheduleDialog(false)
     setShowDeliveryCustomerDialog(false)
+    setPreviewOrder(null)
     setActiveOrder(null)
     setLastPayment(null)
     setCart([])
@@ -356,11 +358,14 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setDeliveryAddress('')
   }
 
-  function chooseTable(table: RestaurantTable): void {
+  function chooseTable(table: RestaurantTable, edit = false): void {
     if (failedSubmission || submitting) return
+    const order = (menu?.activeOrders ?? []).find((candidate) => candidate.id === table.orderId)
+      ?? (menu?.activeOrders ?? []).find((candidate) => candidate.type === 'dine_in' && candidate.tableId === table.id)
+      ?? null
     setSelectedTable(table.id)
     setFloor(table.floor)
-    setTableViewOpen(true)
+    setTableViewOpen(!order || edit)
     setDeliveryOrderOpen(false)
     setParcelOrderOpen(false)
     setSelectedDeliveryNumber(null)
@@ -372,9 +377,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setCart([])
     setError('')
     setSavedMessage('')
-    const order = (menu?.activeOrders ?? []).find((candidate) => candidate.id === table.orderId)
-      ?? (menu?.activeOrders ?? []).find((candidate) => candidate.type === 'dine_in' && candidate.tableId === table.id)
-      ?? null
+    setPreviewOrder(order && !edit ? order : null)
     setActiveOrder(order)
     setLastPayment(null)
     if (order?.discount?.kind === 'percentage') {
@@ -413,12 +416,12 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   function recallBill(order: SavedOrder): void {
     if (cart.length > 0 && !window.confirm('Discard unsaved items and recall this bill?')) return
     if (order.type === 'delivery' && order.deliveryNumber !== null) {
-      chooseDeliverySlot(order.deliveryNumber)
+      chooseDeliverySlot(order.deliveryNumber, true)
       setShowRecallBill(false)
       return
     }
     if (order.type === 'parcel' && order.parcelNumber !== null) {
-      chooseParcelSlot(order.parcelNumber)
+      chooseParcelSlot(order.parcelNumber, true)
       setShowRecallBill(false)
       return
     }
@@ -427,6 +430,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setSelectedTable(table.id)
     setFloor(table.floor)
     setTableViewOpen(true)
+    setPreviewOrder(null)
     setServiceSection('tables')
     setOrderType('dine_in')
     chooseTableOrder(order)
@@ -445,7 +449,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setSavedMessage('New independent bill started for this table.')
   }
 
-  function chooseDeliverySlot(deliveryNumber: number): void {
+  function chooseDeliverySlot(deliveryNumber: number, edit = false): void {
     if (failedSubmission || submitting) return
     const order = activeDeliveryOrders.find((candidate) => candidate.deliveryNumber === deliveryNumber) ?? null
     setServiceSection('delivery')
@@ -454,7 +458,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setSelectedParcelNumber(null)
     setSelectedTable(null)
     setTableViewOpen(false)
-    setDeliveryOrderOpen(true)
+    setDeliveryOrderOpen(!order || edit)
     setSelectedDeliveryNumber(deliveryNumber)
     setScheduledDeliveryAt(order?.scheduledDeliveryAt ?? null)
     setAssignedDeliveryTo(order?.assignedDeliveryTo ?? '')
@@ -469,6 +473,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setDeliveryInstructions(order?.deliveryInstructions ?? '')
     setError('')
     setSavedMessage('')
+    setPreviewOrder(order && !edit ? order : null)
     if (order?.discount?.kind === 'percentage') {
       setDiscountMode('percentage')
       setDiscountInput(String(order.discount.valueBps / 100))
@@ -479,10 +484,10 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       setDiscountMode('none')
       setDiscountInput('0')
     }
-    setShowDeliveryCustomerDialog(Boolean(order && (!order.contactNumber || !order.deliveryAddress)))
+    setShowDeliveryCustomerDialog(Boolean((!edit || !order) && order && (!order.contactNumber || !order.deliveryAddress)))
   }
 
-  function chooseParcelSlot(parcelNumber: number): void {
+  function chooseParcelSlot(parcelNumber: number, edit = false): void {
     if (failedSubmission || submitting) return
     const order = activeParcelOrders.find((candidate) => candidate.parcelNumber === parcelNumber) ?? null
     setServiceSection('parcel')
@@ -490,7 +495,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setSelectedTable(null)
     setTableViewOpen(false)
     setDeliveryOrderOpen(false)
-    setParcelOrderOpen(true)
+    setParcelOrderOpen(!order || edit)
     setSelectedDeliveryNumber(null)
     setSelectedParcelNumber(parcelNumber)
     setScheduledDeliveryAt(null)
@@ -506,6 +511,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setDeliveryInstructions('')
     setError('')
     setSavedMessage('')
+    setPreviewOrder(order && !edit ? order : null)
     if (order?.discount?.kind === 'percentage') {
       setDiscountMode('percentage')
       setDiscountInput(String(order.discount.valueBps / 100))
@@ -528,6 +534,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     if ((cart.length > 0 || discountChanged || changedGuestDetails) && !window.confirm(`Discard unsaved changes and return to ${serviceSection === 'delivery' ? 'delivery' : 'takeaway'} slots?`)) return
     setDeliveryOrderOpen(false)
     setParcelOrderOpen(false)
+    setPreviewOrder(null)
     setSelectedDeliveryNumber(null)
     setSelectedParcelNumber(null)
     setScheduledDeliveryAt(null)
@@ -1084,7 +1091,15 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           </div>
         </header>
 
-        <div className={`workspace ${orderEditorOpen ? 'order-editor-open' : 'service-board-open'}`}>
+        <div className={`workspace ${orderEditorOpen ? 'order-editor-open' : 'service-board-open'} ${previewOrder ? 'order-preview-open' : ''}`}>
+          {previewOrder && <aside className="order-preview-panel" aria-label={`Preview bill ${previewOrder.orderNumber}`}>
+            <header><div><span className="eyebrow">ORDER PREVIEW</span><h2>{formatOrderReference(previewOrder)} · Bill #{previewOrder.orderNumber}</h2><small>{previewOrder.type === 'dine_in' ? `Table ${selectedTableData?.name ?? previewOrder.tableId ?? '—'}` : previewOrder.type === 'delivery' ? previewOrder.customerName || 'Delivery customer pending' : previewOrder.customerName || 'Takeaway guest pending'}</small></div><button onClick={() => { setPreviewOrder(null); setActiveOrder(null) }}>Close</button></header>
+            <div className="preview-status"><span className={`status-dot ${previewOrder.status}`} />{previewOrder.status.replace('_', ' ')}</div>
+            <div className="preview-items">{previewOrder.items.map(item => <div key={item.id}><span><b>{item.productName}</b>{item.note && <small>{item.note}</small>}</span><span>{item.quantity} × {formatMoney(item.unitPricePaise)}<b>{formatMoney(item.quantity * item.unitPricePaise)}</b></span></div>)}</div>
+            <div className="preview-total"><span>Total</span><b>{formatMoney(previewOrder.totalPaise)}</b></div>
+            <p>Preview only. Use Recall to edit this bill.</p>
+            <button className="preview-recall" onClick={() => recallBill(previewOrder)}><Search size={16} />Recall & edit bill</button>
+          </aside>}
           <section className={`catalog-panel ${tableViewOpen || deliveryOrderOpen || parcelOrderOpen ? 'table-order-catalog' : serviceSection === 'delivery' || serviceSection === 'parcel' ? 'delivery-slot-catalog' : ''}`}>
             {!!savedBills.length && <div className="alert success-alert" role="status"><span>{savedBills.length} bill{savedBills.length === 1 ? '' : 's'} saved by waiters. Payment still due.</span><button onClick={() => setShowSavedBills(true)}>View Saved Bills</button></div>}
             {activeOrder?.savedAt && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && <div className="alert success-alert"><span>Saved bill #{activeOrder.orderNumber} · Former table {activeOrder.savedTableName} · {activeOrder.savedTableFloor} · Saved by {activeOrder.savedBy}. Review the items and record payment to close this bill.</span></div>}

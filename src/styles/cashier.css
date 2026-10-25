@@ -53,6 +53,18 @@
 .workspace.service-board-open .catalog-panel { width: 100%; flex: 1 1 100%; padding-right: 34px; padding-left: 34px; }
 .workspace.service-board-open .delivery-slot-board { max-width: none; }
 .workspace.service-board-open .delivery-slot-grid { grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); }
+.workspace.order-preview-open .catalog-panel { width: auto; flex: 1 1 auto; padding-right: 24px; padding-left: 24px; }
+.order-preview-panel { width: 340px; flex: none; display: flex; flex-direction: column; gap: 14px; padding: 22px 18px; border-right: 1px solid #dfe9e2; background: #fff; overflow-y: auto; }
+.order-preview-panel header { display: flex; justify-content: space-between; gap: 10px; }
+.order-preview-panel h2 { margin: 3px 0; color: #25362b; font: 700 16px/22px 'Manrope', sans-serif; }
+.order-preview-panel header small { color: #7e8c82; font-size: 10px; }
+.order-preview-panel header button { height: 30px; border: 1px solid #dce7df; border-radius: 7px; background: #fff; color: #597064; font-size: 10px; cursor: pointer; }
+.preview-status { display: flex; align-items: center; gap: 7px; padding: 9px 10px; border-radius: 8px; background: #f5faf6; color: #557063; font-size: 10px; font-weight: 700; text-transform: capitalize; }
+.preview-items { display: grid; border-top: 1px solid #edf1ee; }
+.preview-items > div { display: flex; justify-content: space-between; gap: 9px; padding: 10px 0; border-bottom: 1px solid #edf1ee; color: #536258; font-size: 10px; }
+.preview-items > div > span:first-child { display: grid; gap: 3px; min-width: 0; }.preview-items small { color: #8c968f; font-size: 9px; }.preview-items > div > span:last-child { display: grid; justify-items: end; gap: 3px; white-space: nowrap; color: #7b887e; }.preview-items > div > span:last-child b { color: #31483a; }
+.preview-total { display: flex; justify-content: space-between; padding: 12px 0; border-top: 1px dashed #dce8df; color: #34483a; font-size: 12px; font-weight: 700; }.preview-total b { color: #207047; font-size: 18px; }
+.order-preview-panel > p { margin: 0; color: #7b8980; font-size: 10px; line-height: 15px; }.preview-recall { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: auto; border: 0; border-radius: 8px; background: #28744d; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
 .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 22px; }
 .eyebrow { color: #87928a; font-size: 8px; line-height: 12px; font-weight: 700; letter-spacing: 1.3px; }
 .page-heading h1 { margin: 4px 0 4px; font: 800 24px/31px 'Manrope', sans-serif; letter-spacing: -.7px; color: #24332a; }
