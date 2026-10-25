@@ -96,6 +96,26 @@ describe('restaurant operations', () => {
     expect(invoke<PaymentLedger>('payments:ledger', saved.id).collectedPaise).toBe(saved.totalPaise)
   })
 
+  it('voids one saved item quantity with manager confirmation and recalculates the unpaid bill', () => {
+    const catalog = invoke<MenuCatalog>('menu:catalog')
+    const [first, second] = catalog.products.filter(product => product.available)
+    const saved = invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'parcel', parcelNumber: 1, tableId: null, customerName: 'Guest', deliveryAddress: '', discount: null,
+      items: [{ productId: first.id, quantity: 3, note: '' }, { productId: second.id, quantity: 1, note: '' }],
+    })
+    invoke('pos:set-manager-pin', '123456')
+    const firstLine = saved.items.find(item => item.productId === first.id)!
+    expect(() => invoke('pos:void-order-item', { orderId: saved.id, itemId: firstLine.id, quantity: 4, pin: '123456', reason: 'Customer changed order' })).toThrow('Cannot void more')
+    expect(() => invoke('pos:void-order-item', { orderId: saved.id, itemId: firstLine.id, quantity: 1, pin: '000000', reason: 'Customer changed order' })).toThrow('Incorrect manager PIN')
+    const updated = invoke<SavedOrder>('pos:void-order-item', { orderId: saved.id, itemId: firstLine.id, quantity: 2, pin: '123456', reason: 'Customer changed order' })
+    expect(updated.items.find(item => item.id === firstLine.id)?.quantity).toBe(1)
+    expect(updated.totalPaise).toBeLessThan(saved.totalPaise)
+    const remaining = updated.items.find(item => item.id === firstLine.id)!
+    const removed = invoke<SavedOrder>('pos:void-order-item', { orderId: saved.id, itemId: remaining.id, quantity: 1, pin: '123456', reason: 'Customer cancelled dish' })
+    expect(removed.items.some(item => item.id === firstLine.id)).toBe(false)
+    expect(() => invoke('pos:void-order-item', { orderId: saved.id, itemId: removed.items[0].id, quantity: 1, pin: '123456', reason: 'Remove final item' })).toThrow('Use Void bill')
+  })
+
   it('caps refunds at the original tender, keeps the invoice paid, and reconciles cash/report totals', () => {
     const { saved } = createBill()
     const ledger = invoke<PaymentLedger>('payments:collect', { requestId: randomUUID(), orderId: saved.id, method: 'cash', amountPaise: saved.totalPaise })

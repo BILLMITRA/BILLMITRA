@@ -24,8 +24,9 @@ import { RestaurantTableCard } from '../components/RestaurantTableCard'
 import { calculateTotals, formatMoney, InvoicePreview, parseDiscountInput, type DiscountMode } from '../features/billing'
 import { BillHistoryDialog } from '../features/payments'
 import { SavedBillsDialog } from '../features/payments/SavedBillsDialog'
-import { createOrder, getOrder, getStaffAccessState, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, recordDuplicateKotRequest, recordPayment, setManagerPin, updateDeliverySchedule, voidOrder } from '../services/pos'
+import { createOrder, getOrder, getStaffAccessState, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, recordDuplicateKotRequest, recordPayment, setManagerPin, updateDeliverySchedule, voidOrder, voidOrderItem } from '../services/pos'
 import { ManagerActionDialog } from '../features/security/ManagerActionDialog'
+import { ItemVoidDialog } from '../features/security/ItemVoidDialog'
 import { KitchenTicketPreview } from '../features/kitchen/KitchenTicketPreview'
 import { DeliveryActionDialog } from '../features/delivery/DeliveryActionDialog'
 import { DeliveryCustomerDialog } from '../features/delivery/DeliveryCustomerDialog'
@@ -88,6 +89,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [showDeliverySchedule, setShowDeliverySchedule] = useState(false)
   const [hasManagerPin, setHasManagerPin] = useState(false)
   const [managerDialogMode, setManagerDialogMode] = useState<ManagerDialogMode | null>(null)
+  const [showItemVoid, setShowItemVoid] = useState(false)
   const [categoryId, setCategoryId] = useState('all')
   const [search, setSearch] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -310,6 +312,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     && (cart.length > 0 || discountChanged || deliveryDetailsChanged || (!activeOrder && Boolean(customerName.trim() || contactNumber.trim() || deliveryAddress.trim() || scheduledDeliveryAt || assignedDeliveryTo)))
   const canVoidBill = Boolean(activeOrder && activeOrder.status !== 'paid' && activeOrder.status !== 'voided'
     && canVoidBills && hasManagerPin && cart.length === 0 && !discountChanged && !deliveryDetailsChanged && !submitting && !failedSubmission)
+  const canVoidItem = Boolean(canVoidBill && activeOrder && activeOrder.items.length > 0)
   const itemCount = existingLines.reduce((count, item) => count + item.quantity, 0)
     + cart.reduce((count, item) => count + item.quantity, 0)
 
@@ -575,6 +578,20 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     } catch (reason) {
       const detail = reason instanceof Error ? reason.message : 'The bill was voided but the screen could not refresh.'
       setError(`Bill #${saved.orderNumber} was voided, but the local view could not refresh: ${detail}`)
+    }
+  }
+
+  async function handleVoidItem(itemId: string, quantity: number, pin: string, reason: string): Promise<void> {
+    if (!activeOrder) throw new Error('Select an open bill before voiding an item.')
+    const saved = await voidOrderItem({ orderId: activeOrder.id, itemId, quantity, pin, reason })
+    setActiveOrder(saved)
+    setShowItemVoid(false)
+    setSavedMessage(`${quantity} item ${quantity === 1 ? 'portion' : 'portions'} voided from bill #${saved.orderNumber}.`)
+    try {
+      await refreshMenu()
+      setBillHistory(await listBillHistory())
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The item was voided but the screen could not refresh.')
     }
   }
 
@@ -1204,6 +1221,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               <button className="right-action danger" onClick={() => setManagerDialogMode('void')} disabled={!canVoidBill} title={!canVoidBills ? 'Manager or owner permission is required to void bills' : !hasManagerPin ? 'Set a manager PIN before voiding bills' : cart.length > 0 || discountChanged ? 'Save or clear unsaved changes before voiding' : 'Voiding requires a manager PIN and a reason'}>
                 <Ban size={15} />Void bill
               </button>
+              <button className="right-action danger" onClick={() => setShowItemVoid(true)} disabled={!canVoidItem} title={!canVoidItem ? 'Select an unpaid saved bill with items; save or clear changes first' : 'Void one item or part of an item quantity'}>
+                <Ban size={15} />Void item
+              </button>
               {!hasManagerPin && canManageSettings && <button className="right-action security-setup" onClick={() => setManagerDialogMode('setup')}><ShieldCheck size={15} />Set manager PIN</button>}
               <button className="right-action unavailable" disabled title="Staff calling is available when the waiter module is implemented">Call staff</button>
               <button className="right-action" onClick={() => {
@@ -1220,7 +1240,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               ) : (
                 <>
                   {existingLines.length > 0 && <div className="cart-section-title">SAVED ITEMS <span>Already on order</span></div>}
-                  {existingLines.map((item) => <div className="cart-item saved-item" key={item.id}><div className="cart-item-info"><strong>{item.productName}</strong>{item.note && <small>Note: {item.note}</small>}<span>{item.quantity} × {formatMoney(item.unitPricePaise)}</span></div><b>{formatMoney(item.quantity * item.unitPricePaise)}</b></div>)}
+                  {existingLines.map((item) => <div className="cart-item saved-item" key={item.id}><div className="cart-item-info"><strong>{item.productName}</strong>{item.note && <small>Note: {item.note}</small>}<span>{item.quantity} × {formatMoney(item.unitPricePaise)}</span></div><div className="cart-item-right"><button className="remove-line-button" onClick={() => setShowItemVoid(true)} aria-label={`Void ${item.productName}`} title="Void item or quantity" disabled={!canVoidItem}><Ban size={14} /></button><b>{formatMoney(item.quantity * item.unitPricePaise)}</b></div></div>)}
                   {cart.length > 0 && <div className="cart-section-title">{activeOrder ? 'ADD TO ORDER' : 'ORDER ITEMS'}<span>Unsaved</span></div>}
                   {cart.map(({ product, quantity, note }) => (
                     <div className="cart-item draft-item" key={product.id}>
@@ -1368,6 +1388,13 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           onClose={() => setManagerDialogMode(null)}
           onSetPin={handleSetManagerPin}
           onVoid={handleVoidOrder}
+        />
+      )}
+      {showItemVoid && activeOrder && (
+        <ItemVoidDialog
+          order={activeOrder}
+          onClose={() => setShowItemVoid(false)}
+          onVoid={handleVoidItem}
         />
       )}
       {showDeliveryScheduleDialog && selectedDeliveryNumber !== null && (

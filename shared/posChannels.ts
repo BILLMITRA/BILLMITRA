@@ -38,6 +38,7 @@ export const posChannels = {
   managerPinConfigured: 'pos:manager-pin-configured',
   setManagerPin: 'pos:set-manager-pin',
   voidOrder: 'pos:void-order',
+  voidOrderItem: 'pos:void-order-item',
   recordDuplicateKotRequest: 'pos:record-duplicate-kot-request',
   listDeliverySchedule: 'delivery:list-schedule',
   findSavedDeliveryCustomer: 'delivery:find-customer',

@@ -66,6 +66,8 @@ const api = {
     ipcRenderer.invoke('pos:set-manager-pin', pin),
   voidOrder: (input: { orderId: string; pin: string; reason: string }): Promise<SavedOrder> =>
     ipcRenderer.invoke('pos:void-order', input),
+  voidOrderItem: (input: { orderId: string; itemId: string; quantity: number; pin: string; reason: string }): Promise<SavedOrder> =>
+    ipcRenderer.invoke('pos:void-order-item', input),
   recordDuplicateKotRequest: (orderId: string): Promise<void> =>
     ipcRenderer.invoke('pos:record-duplicate-kot-request', orderId),
   listDeliverySchedule: (): Promise<DeliveryScheduleEntry[]> =>

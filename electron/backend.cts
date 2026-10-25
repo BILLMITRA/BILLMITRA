@@ -95,6 +95,13 @@ export function createPosBackend(databasePath: string) {
     pin: managerPinSchema,
     reason: z.string().trim().min(3).max(250),
   })
+  const voidOrderItemSchema = z.object({
+    orderId: z.string().uuid(),
+    itemId: z.string().uuid(),
+    quantity: z.number().int().min(1).max(99),
+    pin: managerPinSchema,
+    reason: z.string().trim().min(3).max(250),
+  })
   const database = new DatabaseSync(databasePath)
   closeOnFailure = () => database.close()
   const backups = new DatabaseBackupService(database, databasePath)
@@ -698,6 +705,67 @@ export function createPosBackend(databasePath: string) {
     return outcome.order
   }
 
+  function voidOrderItem(rawInput: unknown, actor: StaffIdentity): SavedOrder {
+    const input = voidOrderItemSchema.parse(rawInput)
+    const outcome = withTransaction(database, () => {
+      const credential = database.prepare(`SELECT pin_salt AS salt, pin_hash AS hash,
+        failed_attempts AS failedAttempts, locked_until AS lockedUntil FROM manager_credentials WHERE id=1`).get() as
+        { salt: string; hash: string; failedAttempts: number; lockedUntil: string | null } | undefined
+      if (!credential) throw new Error('Set a manager PIN on this device before voiding items.')
+      if (credential.lockedUntil && new Date(`${credential.lockedUntil.replace(' ', 'T')}Z`).getTime() > Date.now())
+        throw new Error('Manager PIN is temporarily locked after too many incorrect attempts. Try again later.')
+      if (!verifyManagerPin(input.pin, credential.salt, credential.hash)) {
+        const attempts = (credential.lockedUntil ? 0 : credential.failedAttempts) + 1
+        const lockedUntil = attempts >= 5 ? new Date(Date.now() + 5 * 60_000).toISOString().replace('T', ' ').slice(0, 19) : null
+        database.prepare('UPDATE manager_credentials SET failed_attempts=?, locked_until=? WHERE id=1').run(lockedUntil ? 0 : attempts, lockedUntil)
+        return { error: lockedUntil ? 'Too many incorrect PIN attempts. Try again in five minutes.' : 'Incorrect manager PIN.' } as const
+      }
+      database.prepare('UPDATE manager_credentials SET failed_attempts=0, locked_until=NULL WHERE id=1').run()
+      const order = database.prepare(`SELECT display_number AS orderNumber, paid_at AS paidAt, voided_at AS voidedAt,
+        discount_kind AS discountKind, discount_value AS discountValue FROM orders WHERE id=?`).get(input.orderId) as {
+          orderNumber: number; paidAt: string | null; voidedAt: string | null; discountKind: 'none' | 'percentage' | 'fixed'; discountValue: number
+        } | undefined
+      if (!order) throw new Error('Bill not found.')
+      if (financial.hasUnrefundedPayments(input.orderId) || order.paidAt) throw new Error('Refund collected payments before voiding bill items.')
+      if (order.voidedAt) throw new Error('A voided bill cannot be changed.')
+      const item = database.prepare(`SELECT id, product_id AS productId, product_name AS productName,
+        unit_price_paise AS unitPricePaise, tax_rate_bps AS taxRateBps, quantity, note
+        FROM order_items WHERE id=? AND order_id=?`).get(input.itemId, input.orderId) as {
+          id: string; productId: string; productName: string; unitPricePaise: number; taxRateBps: number; quantity: number; note: string
+        } | undefined
+      if (!item) throw new Error('This item is no longer on the bill. Refresh and try again.')
+      if (input.quantity > item.quantity) throw new Error('Cannot void more than the ordered quantity.')
+      const totalItems = (database.prepare('SELECT COUNT(*) AS count FROM order_items WHERE order_id=?').get(input.orderId) as { count: number }).count
+      if (totalItems === 1 && input.quantity === item.quantity) throw new Error('Use Void bill to remove the final item from this bill.')
+      const voidId = randomUUID()
+      database.prepare(`INSERT INTO order_item_voids(id,order_id,item_id,product_id,product_name,unit_price_paise,
+        tax_rate_bps,quantity,note,reason,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`).run(
+          voidId, input.orderId, item.id, item.productId, item.productName, item.unitPricePaise,
+          item.taxRateBps, input.quantity, item.note, input.reason, actor.username)
+      if (input.quantity === item.quantity) database.prepare('DELETE FROM order_items WHERE id=? AND order_id=?').run(item.id, input.orderId)
+      else database.prepare('UPDATE order_items SET quantity=quantity-? WHERE id=? AND order_id=?').run(input.quantity, item.id, input.orderId)
+      const discount: BillDiscount | null = order.discountKind === 'percentage' ? { kind: 'percentage', valueBps: order.discountValue }
+        : order.discountKind === 'fixed' ? { kind: 'fixed', valuePaise: order.discountValue } : null
+      const lines = database.prepare('SELECT unit_price_paise AS unitPricePaise, quantity, tax_rate_bps AS taxRateBps FROM order_items WHERE order_id=?').all(input.orderId) as
+        Array<{ unitPricePaise: number; quantity: number; taxRateBps: number }>
+      const safeDiscount = discount?.kind === 'fixed' && discount.valuePaise > lines.reduce((sum, line) => sum + line.unitPricePaise * line.quantity, 0)
+        ? { kind: 'fixed' as const, valuePaise: lines.reduce((sum, line) => sum + line.unitPricePaise * line.quantity, 0) }
+        : discount
+      const totals = calculateTotals(lines, safeDiscount)
+      database.prepare(`UPDATE orders SET subtotal_paise=?,tax_paise=?,total_paise=?,discount_kind=?,discount_value=?,discount_paise=? WHERE id=?`).run(
+        totals.subtotalPaise, totals.taxPaise, totals.totalPaise, safeDiscount?.kind ?? 'none',
+        safeDiscount?.kind === 'percentage' ? safeDiscount.valueBps : safeDiscount?.kind === 'fixed' ? safeDiscount.valuePaise : 0,
+        totals.discountPaise, input.orderId)
+      database.prepare(`INSERT INTO audit_log(id,action,entity_type,entity_id,actor,reason,details_json)
+        VALUES(?,'bill.item_voided','order_item_void',?,?,?,?)`).run(randomUUID(), voidId, actor.username, input.reason,
+          JSON.stringify({ orderNumber: order.orderNumber, itemId: item.id, productName: item.productName, quantity: input.quantity, managerPinAuthorized: true }))
+      return { order: orderFromRow(input.orderId) }
+    })
+    if ('error' in outcome) throw new Error(outcome.error)
+    if (!outcome.order) throw new Error('Item was voided but the bill could not be loaded.')
+    return outcome.order
+  }
+
   function recordDuplicateKotRequest(rawOrderId: unknown, actor: StaffIdentity): void {
     const orderId = z.string().uuid().parse(rawOrderId)
     withTransaction(database, () => {
@@ -989,6 +1057,16 @@ export function createPosBackend(databasePath: string) {
   deliveryCashHandovers.migrate()
   const deliveryRunSettlements = new DeliveryRunSettlements(database, action => withTransaction(database, action), financial)
   deliveryRunSettlements.migrate()
+  withTransaction(database, () => {
+    if (database.prepare('SELECT version FROM schema_migrations WHERE version=20').get()) return
+    database.exec(`CREATE TABLE order_item_voids (
+      id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id), item_id TEXT NOT NULL,
+      product_id TEXT NOT NULL, product_name TEXT NOT NULL, unit_price_paise INTEGER NOT NULL,
+      tax_rate_bps INTEGER NOT NULL, quantity INTEGER NOT NULL CHECK(quantity > 0), note TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT(datetime('now'))
+    ); CREATE INDEX order_item_voids_order ON order_item_voids(order_id,created_at DESC);
+    INSERT INTO schema_migrations(version) VALUES(20);`)
+  })
   register('waiter:save-bill', (event, input) => savedTableBills.save(requireStaffPermission(event, 'waiter:operate'), input))
   register('delivery:cash-handovers', (event, riderId) => deliveryCashHandovers.list(requireStaffPermission(event, 'delivery:view'), riderId))
   register('delivery:record-cash-handover', (event, input) => deliveryCashHandovers.record(requireStaffPermission(event, 'payments:record'), input))
@@ -1103,6 +1181,10 @@ export function createPosBackend(databasePath: string) {
     return setManagerPin(pin, actor)
   })
   register('pos:void-order', (event, input: unknown) => voidOrderForStaff(event, input))
+  register('pos:void-order-item', (event, input: unknown) => {
+    const actor = requireStaffPermission(event, 'bill:void')
+    return voidOrderItem(input, actor)
+  })
   register('pos:record-duplicate-kot-request', (event, orderId: unknown) => {
     const actor = requireStaffPermission(event, 'bill:reprint')
     return recordDuplicateKotRequest(orderId, actor)

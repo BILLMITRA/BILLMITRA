@@ -9,6 +9,7 @@
 .manager-action-dialog > p { margin: 0 0 18px; color: #78847b; font-size: 11px; line-height: 17px; }
 .manager-action-field { display: grid; gap: 6px; margin-top: 12px; color: #4d5b51; font-size: 10px; font-weight: 700; }
 .manager-action-field input, .manager-action-field textarea { width: 100%; min-height: 42px; border: 1px solid #dfe6e0; border-radius: 8px; padding: 9px 11px; background: #fff; color: #344239; font-size: 13px; }
+.manager-action-field select { width: 100%; min-height: 42px; border: 1px solid #dfe6e0; border-radius: 8px; padding: 9px 11px; background: #fff; color: #344239; font-size: 13px; }
 .manager-action-field textarea { resize: vertical; font: inherit; font-size: 11px; line-height: 16px; }
 .manager-action-field input::placeholder, .manager-action-field textarea::placeholder { color: #a3aca5; font-weight: 400; }
 .manager-action-error { margin-top: 12px; padding: 9px 10px; border: 1px solid #f1d2ce; border-radius: 7px; color: #a3473b; background: #fff4f1; font-size: 10px; line-height: 15px; }
@@ -18,3 +19,9 @@
 .manager-action-dialog footer .manager-action-submit.void { border-color: #a3473b; background: #a3473b; }
 .manager-action-dialog footer button:disabled { opacity: .6; cursor: wait; }
 .manager-action-security-note { display: block; margin-top: 12px; color: #89948c; font-size: 9px; line-height: 14px; }
+.item-void-summary { display: grid; gap: 3px; margin-top: 12px; padding: 10px; border-radius: 8px; background: #f4f8f4; color: #425247; font-size: 11px; }
+.item-void-summary span { color: #708075; }
+.item-void-quantity { display: flex; align-items: center; gap: 10px; margin-top: 13px; color: #4d5b51; font-size: 11px; font-weight: 700; }
+.item-void-quantity button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #dfe6e0; border-radius: 7px; background: #fff; color: #355b43; cursor: pointer; }
+.item-void-quantity button:disabled { opacity: .45; cursor: not-allowed; }
+.item-void-confirm { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; color: #4d5b51; font-size: 11px; line-height: 16px; }

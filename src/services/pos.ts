@@ -95,6 +95,10 @@ export function voidOrder(input: { orderId: string; pin: string; reason: string 
   return posApi.voidOrder(input)
 }
 
+export function voidOrderItem(input: { orderId: string; itemId: string; quantity: number; pin: string; reason: string }) {
+  return posApi.voidOrderItem(input)
+}
+
 export function recordDuplicateKotRequest(orderId: string) {
   return posApi.recordDuplicateKotRequest(orderId)
 }
