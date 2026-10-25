@@ -79,11 +79,12 @@ it('survives server restart with the saved bill still available to the cashier',
 it('upgrades the previous schema without losing open orders or table occupancy', () => {
   backend.close()
   const db = new DatabaseSync(path)
-  db.exec(`DROP INDEX one_open_order_per_table;
+  db.exec(`DROP INDEX IF EXISTS open_orders_by_table;
+    DROP INDEX IF EXISTS one_open_order_per_table;
     ALTER TABLE orders DROP COLUMN saved_at; ALTER TABLE orders DROP COLUMN saved_by;
     ALTER TABLE orders DROP COLUMN saved_table_name; ALTER TABLE orders DROP COLUMN saved_table_floor;
     CREATE UNIQUE INDEX one_open_order_per_table ON orders(table_id) WHERE table_id IS NOT NULL AND paid_at IS NULL AND voided_at IS NULL;
-    DELETE FROM schema_migrations WHERE version=17;`)
+    DELETE FROM schema_migrations WHERE version IN (17,21);`)
   db.close(); backend = createPosBackend(path); backend.invoke('staff:login', 1, owner)
   expect(menu().activeOrders[0]).toMatchObject({ id: order.id, items: order.items, totalPaise: order.totalPaise, savedAt: null })
   expect(menu().tables.find(table => table.id === order.tableId)?.orderId).toBe(order.id)

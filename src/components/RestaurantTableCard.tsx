@@ -34,7 +34,7 @@ export function RestaurantTableCard({ table, selected, onSelect, now, onPrint }:
       {occupied && <div className="table-elapsed"><Clock3 size={15} /><b>{timer.label}</b>{timer.state === 'overdue' && <span>Over 1 hour</span>}</div>}
       {table.orderNumber && (
         <div className="table-order">
-          <span>Order #{table.orderNumber}</span>
+          <span>Order #{table.orderNumber}{table.activeOrderCount > 1 ? ` +${table.activeOrderCount - 1}` : ''}</span>
           <b>{formatMoney(table.amountPaise ?? 0)}</b>
         </div>
       )}

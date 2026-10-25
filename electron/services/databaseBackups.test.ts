@@ -56,7 +56,8 @@ it('does not resend historical paid orders to the kitchen when upgrading an olde
       WHERE type='delivery' AND delivery_number IS NOT NULL AND paid_at IS NULL AND voided_at IS NULL;
     DROP TABLE delivery_cash_handover_items; DROP TABLE delivery_cash_handovers;
     DROP TABLE print_jobs; DROP TABLE kitchen_tickets;
-    DROP INDEX one_open_order_per_table;
+    DROP INDEX IF EXISTS open_orders_by_table;
+    DROP INDEX IF EXISTS one_open_order_per_table;
     ALTER TABLE orders DROP COLUMN saved_at; ALTER TABLE orders DROP COLUMN saved_by;
     ALTER TABLE orders DROP COLUMN saved_table_name; ALTER TABLE orders DROP COLUMN saved_table_floor;
     CREATE UNIQUE INDEX one_open_order_per_table ON orders(table_id) WHERE table_id IS NOT NULL AND paid_at IS NULL AND voided_at IS NULL;

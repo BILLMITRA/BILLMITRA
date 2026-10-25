@@ -87,6 +87,8 @@ export interface RestaurantTable {
   orderNumber: number | null
   amountPaise: number | null
   startedAt: string | null
+  /** Number of unpaid, active bills currently associated with this table. */
+  activeOrderCount: number
 }
 
 export interface OrderLineInput {

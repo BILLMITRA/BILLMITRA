@@ -230,6 +230,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       .slice(0, 7)
   }, [menu, search])
   const visibleTables = (menu?.tables ?? []).filter((table) => floor === 'All tables' || table.floor === floor)
+  const selectedTableOrders = useMemo(() => selectedTable
+    ? (menu?.activeOrders ?? []).filter((order) => order.type === 'dine_in' && order.tableId === selectedTable && !order.savedAt)
+    : [], [menu, selectedTable])
   const savedBills = (menu?.activeOrders ?? []).filter(order => Boolean(order.savedAt))
   const printableTable = activeOrder?.type === 'dine_in' && activeOrder.tableId
     ? (() => {
@@ -358,7 +361,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setCart([])
     setError('')
     setSavedMessage('')
-    const order = menu?.activeOrders.find((candidate) => candidate.id === table.orderId) ?? null
+    const order = (menu?.activeOrders ?? []).find((candidate) => candidate.id === table.orderId)
+      ?? (menu?.activeOrders ?? []).find((candidate) => candidate.type === 'dine_in' && candidate.tableId === table.id)
+      ?? null
     setActiveOrder(order)
     setLastPayment(null)
     if (order?.discount?.kind === 'percentage') {
@@ -372,6 +377,38 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       setDiscountInput('0')
     }
     setCustomerName('')
+  }
+
+  function chooseTableOrder(order: SavedOrder): void {
+    if (failedSubmission || submitting) return
+    if (cart.length > 0 && !window.confirm('Discard unsaved items and open this bill?')) return
+    setActiveOrder(order)
+    setCart([])
+    setLastPayment(null)
+    setError('')
+    setSavedMessage(`Opened bill #${order.orderNumber}.`)
+    if (order.discount?.kind === 'percentage') {
+      setDiscountMode('percentage')
+      setDiscountInput(String(order.discount.valueBps / 100))
+    } else if (order.discount?.kind === 'fixed') {
+      setDiscountMode('fixed')
+      setDiscountInput((order.discount.valuePaise / 100).toFixed(2))
+    } else {
+      setDiscountMode('none')
+      setDiscountInput('0')
+    }
+  }
+
+  function startNewTableOrder(): void {
+    if (!selectedTable || failedSubmission || submitting) return
+    if ((cart.length > 0 || activeOrder) && !window.confirm('Start a separate new bill for this table? Unsaved items on the current screen will be cleared.')) return
+    setActiveOrder(null)
+    setCart([])
+    setLastPayment(null)
+    setDiscountMode('none')
+    setDiscountInput('0')
+    setError('')
+    setSavedMessage('New independent bill started for this table.')
   }
 
   function chooseDeliverySlot(deliveryNumber: number): void {
@@ -1110,6 +1147,13 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
 
             {(serviceSection === 'tables' || serviceSection === 'parcel' && parcelOrderOpen || serviceSection === 'delivery' && deliveryOrderOpen) && <div className={`menu-selector ${tableViewOpen || deliveryOrderOpen || parcelOrderOpen ? 'table-order-menu' : ''}`}>
               {(deliveryOrderOpen || parcelOrderOpen) && <div className="delivery-menu-context"><button className="back-to-delivery-slots" onClick={returnToServiceSlots}><ArrowLeft size={14} />All {deliveryOrderOpen ? 'HD' : 'P'} slots</button><span><b>{deliveryOrderOpen ? `HD-${selectedDeliveryNumber}` : `P-${selectedParcelNumber}`}</b><small>{deliveryOrderOpen ? 'Home delivery order' : 'Takeaway order'}</small></span></div>}
+              {tableViewOpen && selectedTableData && <div className="table-orders-context">
+                <div><button className="back-to-tables" onClick={() => setTableViewOpen(false)}><ArrowLeft size={14} />Tables</button><span><b>Table {selectedTableData.name}</b><small>{selectedTableData.floor} · {selectedTableOrders.length} active bill{selectedTableOrders.length === 1 ? '' : 's'}</small></span></div>
+                <div className="table-order-tabs">
+                  {selectedTableOrders.map((order) => <button key={order.id} className={activeOrder?.id === order.id ? 'selected' : ''} onClick={() => chooseTableOrder(order)}>Bill #{order.orderNumber}<small>{formatMoney(order.totalPaise)}</small></button>)}
+                  <button className={!activeOrder ? 'selected new-table-order' : 'new-table-order'} onClick={startNewTableOrder}><Plus size={14} />New</button>
+                </div>
+              </div>}
             <div className="menu-heading">
               <div><div className="eyebrow">THE MENU</div><h2>Choose from the menu</h2></div>
             </div>

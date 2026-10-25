@@ -116,6 +116,24 @@ describe('restaurant operations', () => {
     expect(() => invoke('pos:void-order-item', { orderId: saved.id, itemId: removed.items[0].id, quantity: 1, pin: '123456', reason: 'Remove final item' })).toThrow('Use Void bill')
   })
 
+  it('keeps independent active bills under the same dine-in table', () => {
+    const menu = invoke<import('../../shared/domain').MenuData>('pos:load-menu')
+    const table = menu.tables[0]
+    const product = menu.products.find(item => item.available)!
+    const first = invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'dine_in', tableId: table.id, customerName: '', deliveryAddress: '', discount: null,
+      items: [{ productId: product.id, quantity: 1, note: 'First bill' }],
+    })
+    const second = invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'dine_in', tableId: table.id, customerName: '', deliveryAddress: '', discount: null,
+      items: [{ productId: product.id, quantity: 2, note: 'Second bill' }],
+    })
+    expect(second.id).not.toBe(first.id)
+    const refreshed = invoke<import('../../shared/domain').MenuData>('pos:load-menu')
+    expect(refreshed.activeOrders.filter(order => order.tableId === table.id).map(order => order.id)).toEqual(expect.arrayContaining([first.id, second.id]))
+    expect(refreshed.tables.find(item => item.id === table.id)).toMatchObject({ activeOrderCount: 2 })
+  })
+
   it('caps refunds at the original tender, keeps the invoice paid, and reconciles cash/report totals', () => {
     const { saved } = createBill()
     const ledger = invoke<PaymentLedger>('payments:collect', { requestId: randomUUID(), orderId: saved.id, method: 'cash', amountPaise: saved.totalPaise })

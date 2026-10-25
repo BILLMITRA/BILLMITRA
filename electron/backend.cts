@@ -585,16 +585,24 @@ export function createPosBackend(databasePath: string) {
     const tables = database.prepare(`
       SELECT t.id, t.name, t.floor, t.capacity,
         o.id AS orderId, o.display_number AS orderNumber, o.total_paise AS amountPaise,
-        o.created_at AS startedAt, o.status
+        o.created_at AS startedAt, o.status,
+        (SELECT COUNT(*) FROM orders active
+          WHERE active.table_id = t.id AND active.saved_at IS NULL
+            AND active.status IN ('ordering', 'preparing', 'ready', 'payment_pending')
+            AND active.paid_at IS NULL AND active.voided_at IS NULL) AS activeOrderCount
       FROM restaurant_tables t
-      LEFT JOIN orders o ON o.table_id = t.id
-        AND o.saved_at IS NULL
-        AND o.status IN ('ordering', 'preparing', 'ready', 'payment_pending')
-        AND o.paid_at IS NULL AND o.voided_at IS NULL
+      LEFT JOIN orders o ON o.id = (
+        SELECT latest.id FROM orders latest
+        WHERE latest.table_id = t.id AND latest.saved_at IS NULL
+          AND latest.status IN ('ordering', 'preparing', 'ready', 'payment_pending')
+          AND latest.paid_at IS NULL AND latest.voided_at IS NULL
+        ORDER BY latest.created_at DESC, latest.rowid DESC LIMIT 1
+      )
       ORDER BY t.floor, t.name
     `).all() as Array<{
       id: string; name: string; floor: string; capacity: number; orderId: string | null
       orderNumber: number | null; amountPaise: number | null; startedAt: string | null; status: OrderStatus | null
+      activeOrderCount: number
     }>
     const activeOrders = database.prepare(`
       SELECT id FROM orders WHERE (paid_at IS NULL OR (type='delivery' AND delivery_settled_at IS NULL)) AND voided_at IS NULL
@@ -830,8 +838,7 @@ export function createPosBackend(databasePath: string) {
       throw new Error('Enter a customer name for takeaway orders.')
     }
 
-    try {
-      return withTransaction(database, () => {
+    return withTransaction(database, () => {
       const prior = database.prepare(`
         SELECT id FROM orders WHERE request_id = ?
         UNION ALL SELECT order_id AS id FROM order_requests WHERE request_id = ?
@@ -895,15 +902,6 @@ export function createPosBackend(databasePath: string) {
           })
         }
       } else {
-        if (input.tableId) {
-          const openOrder = database.prepare(`
-            SELECT id FROM orders WHERE table_id = ?
-              AND saved_at IS NULL
-              AND paid_at IS NULL AND voided_at IS NULL
-              AND status IN ('ordering', 'preparing', 'ready', 'payment_pending')
-          `).get(input.tableId)
-          if (openOrder) throw new Error('This table already has an open order. Refresh and select that order instead.')
-        }
         orderId = randomUUID()
         const displayNumber = (database.prepare('SELECT COALESCE(MAX(display_number), 0) + 1 AS next FROM orders').get() as { next: number }).next
         const deliveryNumber = input.type === 'delivery' ? input.deliveryNumber ?? null : null
@@ -993,13 +991,7 @@ export function createPosBackend(databasePath: string) {
           discountPaise: saved.discountPaise,
         }))
       return saved
-      })
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('one_open_order_per_table')) {
-        throw new Error('This table already has an open order. Refresh and select that order instead.')
-      }
-      throw error
-    }
+    })
   }
 
 
@@ -1066,6 +1058,14 @@ export function createPosBackend(databasePath: string) {
       reason TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT(datetime('now'))
     ); CREATE INDEX order_item_voids_order ON order_item_voids(order_id,created_at DESC);
     INSERT INTO schema_migrations(version) VALUES(20);`)
+  })
+  withTransaction(database, () => {
+    if (database.prepare('SELECT version FROM schema_migrations WHERE version=21').get()) return
+    database.exec(`DROP INDEX IF EXISTS one_open_order_per_table;
+      CREATE INDEX IF NOT EXISTS open_orders_by_table ON orders(table_id, created_at DESC)
+        WHERE table_id IS NOT NULL AND saved_at IS NULL AND paid_at IS NULL AND voided_at IS NULL
+          AND status IN ('ordering','preparing','ready','payment_pending');
+      INSERT INTO schema_migrations(version) VALUES(21);`)
   })
   register('waiter:save-bill', (event, input) => savedTableBills.save(requireStaffPermission(event, 'waiter:operate'), input))
   register('delivery:cash-handovers', (event, riderId) => deliveryCashHandovers.list(requireStaffPermission(event, 'delivery:view'), riderId))
