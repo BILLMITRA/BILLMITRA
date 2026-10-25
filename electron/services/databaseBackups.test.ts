@@ -46,7 +46,8 @@ it('does not resend historical paid orders to the kitchen when upgrading an olde
   backend!.invoke('pos:record-payment', 1, { requestId: randomUUID(), orderId: paid.id, method: 'cash' })
   backend!.close(); backend = undefined
   const db = new DatabaseSync(path)
-  db.exec(`DROP TABLE print_jobs; DROP TABLE kitchen_tickets;
+  db.exec(`DROP TABLE delivery_cash_handover_items; DROP TABLE delivery_cash_handovers;
+    DROP TABLE print_jobs; DROP TABLE kitchen_tickets;
     DROP INDEX one_open_order_per_table;
     ALTER TABLE orders DROP COLUMN saved_at; ALTER TABLE orders DROP COLUMN saved_by;
     ALTER TABLE orders DROP COLUMN saved_table_name; ALTER TABLE orders DROP COLUMN saved_table_floor;

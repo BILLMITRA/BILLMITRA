@@ -32,7 +32,7 @@ function verify(path: string, restore = false) {
     if (db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Backup has invalid database references.')
     if (restore) {
       const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as { version: number }[]
-      if (!versions.length || versions.some((row, index) => row.version !== index + 1) || versions.length > 17) throw new Error('Backup schema is unsupported by this version of BillMitra.')
+      if (!versions.length || versions.some((row, index) => row.version !== index + 1) || versions.length > 18) throw new Error('Backup schema is unsupported by this version of BillMitra.')
       db.prepare('SELECT id, request_id, total_paise FROM orders LIMIT 1').all()
       db.prepare('SELECT id, product_name, unit_price_paise FROM order_items LIMIT 1').all()
     }

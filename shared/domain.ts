@@ -246,6 +246,24 @@ export interface DeliveryEvent {
   createdAt: string
 }
 
+export interface DeliveryCashHandoverInput {
+  requestId: string
+  riderId: string
+  notes: string
+  lines: { orderId: string; amountPaise: number }[]
+}
+
+export interface DeliveryCashHandover {
+  id: string
+  riderId: string
+  riderName: string
+  cashier: string
+  notes: string
+  amountPaise: number
+  createdAt: string
+  lines: { orderId: string; reference: string; amountPaise: number; refundedPaise: number }[]
+}
+
 export function formatOrderReference(order: Pick<SavedOrder, 'type' | 'orderNumber' | 'deliveryNumber' | 'parcelNumber'>): string {
   return order.type === 'delivery' && order.deliveryNumber !== null
     ? `HD-${order.deliveryNumber}`

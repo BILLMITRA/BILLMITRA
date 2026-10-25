@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { RestaurantManagementService } from './services/restaurantManagement.cjs'
 import { PrintManagementService } from './services/printManagement.cjs'
 import { SavedTableBills } from './services/savedTableBills.cjs'
+import { DeliveryCashHandovers } from './services/deliveryCashHandovers.cjs'
 import { FinancialManagementService } from './services/financialManagement.cjs'
 import { acquireDatabaseLease, DatabaseBackupService } from './services/databaseBackups.cjs'
 import { DatabaseSync } from 'node:sqlite'
@@ -983,7 +984,11 @@ export function createPosBackend(databasePath: string) {
   printing.migrate()
   const savedTableBills = new SavedTableBills(database, action => withTransaction(database, action), orderFromRow)
   savedTableBills.migrate()
+  const deliveryCashHandovers = new DeliveryCashHandovers(database, action => withTransaction(database, action), financial)
+  deliveryCashHandovers.migrate()
   register('waiter:save-bill', (event, input) => savedTableBills.save(requireStaffPermission(event, 'waiter:operate'), input))
+  register('delivery:cash-handovers', (event, riderId) => deliveryCashHandovers.list(requireStaffPermission(event, 'delivery:view'), riderId))
+  register('delivery:record-cash-handover', (event, input) => deliveryCashHandovers.record(requireStaffPermission(event, 'payments:record'), input))
   const printerActor = (event: RequestContext) => {
     const staff = getStaffAccessState(event).staff
     if (!staff) throw new Error('Sign in to operate desktop printers.')

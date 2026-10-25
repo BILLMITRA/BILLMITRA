@@ -6,6 +6,8 @@ import type {
   RecordPaymentInput,
   StaffLoginInput,
   DeliveryEvent,
+  DeliveryCashHandover,
+  DeliveryCashHandoverInput,
   DeliveryOperation,
   DeliveryRider,
   DeliveryRiderInput,
@@ -120,6 +122,14 @@ export function assignDeliveryRider(input: { orderId: string; riderId: string; r
 
 export function assignDeliveryRiderBatch(input: { orderIds: string[]; riderId: string; reason?: string }): Promise<void> {
   return posApi.assignDeliveryRiderBatch(input)
+}
+
+export function listDeliveryCashHandovers(riderId: string): Promise<DeliveryCashHandover[]> {
+  return posApi.listDeliveryCashHandovers(riderId)
+}
+
+export function recordDeliveryCashHandover(input: DeliveryCashHandoverInput): Promise<DeliveryCashHandover> {
+  return posApi.recordDeliveryCashHandover(input)
 }
 
 export function operateDelivery(input: DeliveryOperation): Promise<void> {

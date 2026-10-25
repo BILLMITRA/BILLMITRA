@@ -62,6 +62,8 @@ export const browserPos: Window['pos'] = {
   updateDeliverySchedule: (input) => invoke('updateDeliverySchedule', input),
   assignDeliveryRider: (input) => invoke('assignDeliveryRider', input),
   assignDeliveryRiderBatch: (input) => invoke('assignDeliveryRiderBatch', input),
+  listDeliveryCashHandovers: (input) => invoke('listDeliveryCashHandovers', input),
+  recordDeliveryCashHandover: (input) => invoke('recordDeliveryCashHandover', input),
   operateDelivery: (input) => invoke('operateDelivery', input),
   listDeliveryEvents: (input) => invoke('listDeliveryEvents', input),
 }

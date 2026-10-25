@@ -61,7 +61,12 @@ export class FinancialManagementService {
 
   collect(actor: StaffIdentity, raw: unknown): PaymentLedger {
     const input = tenderSchema.parse(raw)
-    return this.transaction(() => {
+    return this.transaction(() => this.collectInExistingTransaction(actor, input))
+  }
+
+  // Used by a larger payment transaction, such as a rider cash handover.
+  collectInExistingTransaction(actor: StaffIdentity, raw: unknown): PaymentLedger {
+    const input = tenderSchema.parse(raw)
       const prior = this.db.prepare('SELECT order_id, method, amount_paise FROM payment_tenders WHERE request_id = ?').get(input.requestId) as { order_id: string; method: string; amount_paise: number } | undefined
       if (prior) {
         if (prior.order_id !== input.orderId || prior.method !== input.method || (input.amountPaise !== undefined && prior.amount_paise !== input.amountPaise)) throw new Error('This payment request was already used with different details.')
@@ -83,7 +88,6 @@ export class FinancialManagementService {
       }
       this.audit(actor, 'payment.collected', tenderId, { ...input, amountPaise: amount })
       return this.ledger(input.orderId)
-    })
   }
 
   refund(actor: StaffIdentity, raw: unknown): PaymentLedger {

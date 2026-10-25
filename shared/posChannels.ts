@@ -46,6 +46,8 @@ export const posChannels = {
   updateDeliverySchedule: 'delivery:update-schedule',
   assignDeliveryRider: 'delivery:assign-rider',
   assignDeliveryRiderBatch: 'delivery:assign-rider-batch',
+  listDeliveryCashHandovers: 'delivery:cash-handovers',
+  recordDeliveryCashHandover: 'delivery:record-cash-handover',
   operateDelivery: 'delivery:operate',
   listDeliveryEvents: 'delivery:list-events',
 } as const

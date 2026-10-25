@@ -11,6 +11,8 @@ import type {
   StaffIdentity,
   StaffLoginInput,
   DeliveryEvent,
+  DeliveryCashHandover,
+  DeliveryCashHandoverInput,
   DeliveryOperation,
   DeliveryRider,
   DeliveryRiderInput,
@@ -70,6 +72,8 @@ declare global {
       assignDeliveryRiderBatch: (input: { orderIds: string[]; riderId: string; reason?: string }) => Promise<void>
       operateDelivery: (input: DeliveryOperation) => Promise<void>
       listDeliveryEvents: (orderId: string) => Promise<DeliveryEvent[]>
+      listDeliveryCashHandovers: (riderId: string) => Promise<DeliveryCashHandover[]>
+      recordDeliveryCashHandover: (input: DeliveryCashHandoverInput) => Promise<DeliveryCashHandover>
     }
   }
 }

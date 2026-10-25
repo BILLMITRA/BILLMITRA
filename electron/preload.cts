@@ -12,6 +12,8 @@ import type {
   StaffIdentity,
   StaffLoginInput,
   DeliveryEvent,
+  DeliveryCashHandover,
+  DeliveryCashHandoverInput,
   DeliveryOperation,
   DeliveryRider,
   DeliveryRiderInput,
@@ -77,6 +79,10 @@ const api = {
     ipcRenderer.invoke('delivery:assign-rider', input),
   assignDeliveryRiderBatch: (input: { orderIds: string[]; riderId: string; reason?: string }): Promise<void> =>
     ipcRenderer.invoke('delivery:assign-rider-batch', input),
+  listDeliveryCashHandovers: (riderId: string): Promise<DeliveryCashHandover[]> =>
+    ipcRenderer.invoke('delivery:cash-handovers', riderId),
+  recordDeliveryCashHandover: (input: DeliveryCashHandoverInput): Promise<DeliveryCashHandover> =>
+    ipcRenderer.invoke('delivery:record-cash-handover', input),
   operateDelivery: (input: DeliveryOperation): Promise<void> =>
     ipcRenderer.invoke('delivery:operate', input),
   listDeliveryEvents: (orderId: string): Promise<DeliveryEvent[]> =>

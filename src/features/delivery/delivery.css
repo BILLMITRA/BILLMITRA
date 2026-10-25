@@ -179,6 +179,29 @@
 .delivery-settlement-table th { color: #66746a; background: #f6f9f6; }
 .delivery-settlement-table td small { display: block; margin-top: 4px; color: #829087; font-size: 9px; }
 .delivery-settlement-modal footer button { display: inline-flex; align-items: center; gap: 6px; }
+.delivery-handover-section { display: grid; gap: 10px; padding-top: 15px; border-top: 1px solid #e1e9e2; }
+.delivery-handover-section h3 { margin: 0; color: #2f4737; font-size: 14px; }
+.delivery-handover-section > p { margin: 0; color: #758379; font-size: 10px; line-height: 16px; }
+.delivery-handover-lines, .delivery-handover-history { display: grid; gap: 7px; max-height: 260px; overflow: auto; }
+.delivery-handover-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px; border: 1px solid #e2e9e3; border-radius: 7px; background: #fbfcfb; }
+.delivery-handover-line > span:first-child { display: grid; gap: 4px; }
+.delivery-handover-line b { color: #314c39; font-size: 11px; }
+.delivery-handover-line small { color: #738277; font-size: 9px; }
+.delivery-handover-amount { display: flex; align-items: center; gap: 5px; color: #506354; font-size: 10px; white-space: nowrap; }
+.delivery-handover-amount input { width: 90px; min-height: 35px; padding: 6px 8px; border: 1px solid #cad8ce; border-radius: 6px; color: #263c2c; font: inherit; font-size: 12px; text-align: right; }
+.delivery-handover-amount input[aria-invalid='true'] { border-color: #bc6356; background: #fff5f2; }
+.delivery-handover-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.delivery-handover-confirm b { color: #254e34; font-size: 13px; }
+.delivery-handover-confirm button { min-height: 38px; padding: 0 13px; border: 1px solid #286f4c; border-radius: 6px; background: #286f4c; color: #fff; font-size: 10px; font-weight: 700; cursor: pointer; }
+.delivery-handover-confirm button:disabled { opacity: .5; cursor: not-allowed; }
+.delivery-handover-section > .delivery-handover-error { color: #a64136; }
+.delivery-handover-section > .delivery-handover-notice { color: #286f4c; }
+.delivery-handover-history article { padding: 10px; border: 1px solid #e2e9e3; border-radius: 7px; background: #fbfcfb; }
+.delivery-handover-history header { display: flex; justify-content: space-between; gap: 8px; }
+.delivery-handover-history b { font-size: 10px; }
+.delivery-handover-history small, .delivery-handover-history p, .delivery-handover-history li { color: #647369; font-size: 9px; line-height: 15px; }
+.delivery-handover-history p { margin: 5px 0; }
+.delivery-handover-history ul { margin: 6px 0 0; padding-left: 17px; }
 @media (max-width: 760px) {
   .delivery-customer-layout { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
   .delivery-customer-header { padding: 14px; }
@@ -207,4 +230,5 @@
   .delivery-rider-form-grid, .delivery-detail-grid { grid-template-columns: 1fr; }
   .delivery-settlement-filters { grid-template-columns: 1fr; }
   .delivery-settlement-totals { grid-template-columns: repeat(2, 1fr); }
+  .delivery-handover-line { align-items: flex-start; flex-direction: column; }
 }
