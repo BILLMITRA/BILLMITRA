@@ -40,7 +40,7 @@ import { PaymentLedgerDialog } from '../features/management/PaymentLedgerDialog'
 import { WaiterScreen } from '../features/management/WaiterScreen'
 import { DeliveryScheduleScreen } from '../features/delivery/DeliveryScheduleScreen'
 import type { CartLine } from '../types/cart'
-import { elapsedClockLabel } from '../utils/tablePresentation'
+import { elapsedClockLabel, tableOrderTimer } from '../utils/tablePresentation'
 import '../styles/cashier.css'
 
 type ServiceSection = 'tables' | 'parcel' | 'delivery'
@@ -240,12 +240,28 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const joinCandidates = useMemo(() => (menu?.activeOrders ?? []).filter(order => order.type === 'dine_in' && !order.savedAt && order.id !== activeOrder?.id), [menu, activeOrder?.id])
   const recallableBills = useMemo(() => (menu?.activeOrders ?? []).filter(order => !order.savedAt), [menu])
   const savedBills = (menu?.activeOrders ?? []).filter(order => Boolean(order.savedAt))
-  const printableTable = activeOrder?.type === 'dine_in' && activeOrder.tableId
-    ? (() => {
-      const original = menu?.tables.find(table => table.id === activeOrder.tableId)
-      return original ? { ...original, name: activeOrder.savedTableName ?? original.name, floor: activeOrder.savedTableFloor ?? original.floor, orderId: activeOrder.id } : null
-    })()
-    : null
+  const printTargetForOrder = (order: SavedOrder): RestaurantTable => {
+    if (order.type === 'dine_in' && order.tableId) {
+      const original = menu?.tables.find(table => table.id === order.tableId)
+      if (original) return { ...original, name: order.savedTableName ?? original.name, floor: order.savedTableFloor ?? original.floor, orderId: order.id }
+    }
+    const status = ['ordering', 'preparing', 'ready', 'payment_pending'].includes(order.status)
+      ? order.status as RestaurantTable['status']
+      : 'payment_pending'
+    return {
+      id: order.id,
+      name: formatOrderReference(order),
+      floor: order.type === 'delivery' ? 'Home delivery' : 'Takeaway',
+      capacity: 0,
+      status,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      amountPaise: order.totalPaise,
+      startedAt: order.createdAt,
+      activeOrderCount: 1,
+    }
+  }
+  const printableTable = activeOrder ? printTargetForOrder(activeOrder) : null
   const activeDeliveryOrders = (menu?.activeOrders ?? []).filter((order) => order.type === 'delivery')
   const deliverySlots = Array.from({ length: DELIVERY_SLOT_COUNT }, (_, index) => {
     const deliveryNumber = index + 1
@@ -1150,11 +1166,11 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                   <div><div className="eyebrow">HOME DELIVERY</div><h1 id="delivery-slots-title">Delivery orders</h1><p>Select an available HD number to start, or an active one to continue.</p></div>
                   <div className="delivery-slot-count"><b>{occupiedDeliverySlots}</b><span>of 100 active</span></div>
                 </div>
-                <div className="delivery-slot-grid">
+                <div className="delivery-slot-grid service-slot-grid">
                   {deliverySlots.map(({ deliveryNumber, order }) => (
+                    <article key={deliveryNumber} className={`service-slot-tile timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'}`}>
                     <button
-                      key={deliveryNumber}
-                      className={`delivery-slot-card ${order ? 'occupied' : 'available'}`}
+                      className={`delivery-slot-card ${order ? 'occupied' : 'available'} timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'}`}
                       onClick={() => chooseDeliverySlot(deliveryNumber)}
                       disabled={Boolean(failedSubmission) || submitting}
                       aria-label={order
@@ -1185,6 +1201,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                         </>
                       )}
                     </button>
+                    {order && window.desktopPrinting && <div className="table-print-actions"><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'bill' })}><Printer size={13} />Print Bill</button><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'kot' })}><Printer size={13} />Print KOT</button></div>}
+                    </article>
                   ))}
                 </div>
               </section>
@@ -1196,19 +1214,21 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                   <div><div className="eyebrow">TAKEAWAY</div><h1 id="parcel-slots-title">Pickup orders</h1><p>Select an available P number to start, or an active one to continue.</p></div>
                   <div className="delivery-slot-count"><b>{occupiedParcelSlots}</b><span>of 100 active</span></div>
                 </div>
-                <div className="delivery-slot-grid">
+                <div className="delivery-slot-grid service-slot-grid">
                   {parcelSlots.map(({ parcelNumber, order }) => (
+                    <article key={parcelNumber} className={`service-slot-tile timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'}`}>
                     <button
-                      key={parcelNumber}
-                      className={`delivery-slot-card ${order ? 'occupied' : 'available'}`}
+                      className={`delivery-slot-card ${order ? 'occupied' : 'available'} timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'}`}
                       onClick={() => chooseParcelSlot(parcelNumber)}
                       disabled={Boolean(failedSubmission) || submitting}
                       aria-label={order ? `Continue P-${parcelNumber}, ${order.customerName}, ${formatMoney(order.totalPaise)}` : `Start takeaway order P-${parcelNumber}`}
                     >
                       <span className="delivery-slot-number">P-{parcelNumber}</span>
                       <span className="delivery-slot-status"><i />{order ? order.status.replace('_', ' ') : 'Available'}</span>
-                      {order && <><span className="delivery-slot-customer">{order.customerName}</span><b className="delivery-slot-total">{formatMoney(order.totalPaise)}</b></>}
+                      {order && <><span className="delivery-slot-customer">{order.customerName}</span><span className="delivery-slot-meta delivery-slot-elapsed">{elapsedClockLabel(order.createdAt, deliveryTimerNow) || 'Timer unavailable'}</span><b className="delivery-slot-total">{formatMoney(order.totalPaise)}</b></>}
                     </button>
+                    {order && window.desktopPrinting && <div className="table-print-actions"><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'bill' })}><Printer size={13} />Print Bill</button><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'kot' })}><Printer size={13} />Print KOT</button></div>}
+                    </article>
                   ))}
                 </div>
               </section>

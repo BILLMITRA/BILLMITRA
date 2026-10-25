@@ -579,16 +579,25 @@
 .delivery-slot-count b { color: #286f4c; font: 800 18px 'Manrope', sans-serif; }
 .delivery-slot-count span { color: #849087; font-size: 8px; }
 .delivery-slot-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); grid-auto-rows: 132px; align-content: start; gap: 8px; overflow-y: auto; padding: 2px 4px 6px 0; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.delivery-slot-grid.service-slot-grid { grid-auto-rows: 171px; }
+.service-slot-tile { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.service-slot-tile .delivery-slot-card { flex: 1; }
 .delivery-slot-card { box-sizing: border-box; width: 100%; height: 132px; min-width: 0; min-height: 132px; max-height: 132px; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; overflow: hidden; padding: 9px; border: 1px solid #e4eae4; border-radius: 9px; background: #fff; color: #405047; font-family: 'Segoe UI', Arial, sans-serif; text-align: left; cursor: pointer; transition: border-color .15s, background .15s, transform .15s; }
 .delivery-slot-card:hover { transform: translateY(-1px); border-color: #9ab9a2; }
 .delivery-slot-card:focus-visible, .back-to-delivery-slots:focus-visible { outline: 2px solid #357b50; outline-offset: 2px; }
 .delivery-slot-card.available { border-style: dashed; }
 .delivery-slot-card.available:hover { background: #f3f9f3; }
 .delivery-slot-card.occupied { border-color: #d5e7d7; background: #f3f9f3; }
+.delivery-slot-card.timer-open { border-color: #0d518e; background: #1461a5; color: #fff; }
+.delivery-slot-card.timer-overdue { border-color: #972923; background: #b63832; color: #fff; }
+.delivery-slot-card.timer-open:hover { border-color: #063c70; box-shadow: 0 0 0 2px #c9e2f8; }
+.delivery-slot-card.timer-overdue:hover { border-color: #7d1713; box-shadow: 0 0 0 2px #f4cdca; }
+.delivery-slot-card.timer-open .delivery-slot-number, .delivery-slot-card.timer-overdue .delivery-slot-number, .delivery-slot-card.timer-open .delivery-slot-status, .delivery-slot-card.timer-overdue .delivery-slot-status, .delivery-slot-card.timer-open .delivery-slot-place, .delivery-slot-card.timer-overdue .delivery-slot-place, .delivery-slot-card.timer-open .delivery-slot-customer, .delivery-slot-card.timer-overdue .delivery-slot-customer, .delivery-slot-card.timer-open .delivery-slot-meta, .delivery-slot-card.timer-overdue .delivery-slot-meta, .delivery-slot-card.timer-open .delivery-slot-total, .delivery-slot-card.timer-overdue .delivery-slot-total { color: #fff; }
+.delivery-slot-card.timer-open .delivery-slot-status i, .delivery-slot-card.timer-overdue .delivery-slot-status i { background: #fff; }
 .delivery-slot-number { color: #315940; font: 800 12px 'Manrope', sans-serif; }
 .delivery-slot-status { display: flex; align-items: center; gap: 4px; color: #7b887e; font-size: 8px; line-height: 11px; text-transform: capitalize; }
 .delivery-slot-status i { width: 6px; height: 6px; border-radius: 50%; background: #a5b0a7; }
-.delivery-slot-card.occupied .delivery-slot-status i { background: #df9c42; }
+.delivery-slot-card.occupied:not(.timer-open):not(.timer-overdue) .delivery-slot-status i { background: #df9c42; }
 .delivery-slot-place, .delivery-slot-customer { width: 100%; overflow: hidden; color: #78847b; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .delivery-slot-meta { width: 100%; overflow: hidden; color: #536d5c; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .delivery-slot-rider { color: #286f4c; font-weight: 700; }

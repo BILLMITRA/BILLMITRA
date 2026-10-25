@@ -51,8 +51,9 @@ export function TablePrintDialog({ table, kind, onClose }: { table: RestaurantTa
     finally { sending.current = false; setBusy(false) }
   }
   const order = details?.order
+  const targetLabel = table.floor === 'Home delivery' || table.floor === 'Takeaway' ? table.name : `Table ${table.name}`
   return <div className="print-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onClose() }}><section className="print-settings table-print-dialog" role="dialog" aria-modal="true" aria-labelledby="table-print-title">
-    <header><h2 id="table-print-title">{kind === 'bill' ? 'Print Bill' : 'Print KOT'} · Table {table.name}</h2><button ref={closeButton} aria-label="Close table printing" onClick={onClose} disabled={busy}><X size={18} /></button></header>
+    <header><h2 id="table-print-title">{kind === 'bill' ? 'Print Bill' : 'Print KOT'} · {targetLabel}</h2><button ref={closeButton} aria-label="Close table printing" onClick={onClose} disabled={busy}><X size={18} /></button></header>
     <p>{table.floor}{order ? ` · Order #${order.orderNumber}` : ''} · Saved items only</p>
     {loadError && <p role="alert" className="management-error">{loadError}</p>}{error && <p role="alert" className="management-error">{error}</p>}{notice && <p role="status" className="management-notice">{notice}</p>}
     {!details && !loadError && <p>Loading saved order…</p>}

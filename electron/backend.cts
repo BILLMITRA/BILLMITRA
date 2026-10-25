@@ -1252,7 +1252,7 @@ export function createPosBackend(databasePath: string) {
     requireStaffPermission(event, 'pos:access')
     const orderId = z.string().uuid().parse(raw)
     const order = orderFromRow(orderId)
-    if (!order || !['dine_in', 'delivery'].includes(order.type) || order.status === 'paid' || order.status === 'voided') throw new Error('Select an open saved table or delivery order.')
+    if (!order || order.status === 'paid' || order.status === 'voided' || order.status === 'joined') throw new Error('Select an open saved order.')
     return { order, kitchenTickets: printing.tickets(orderId), jobs: printing.list([orderId]) }
   })
   register('print:claim', (event, input) => printing.claim(printerActor(event), input))
