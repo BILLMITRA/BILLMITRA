@@ -67,6 +67,7 @@ export class DeliveryRunSettlements {
     const openOrders = this.db.prepare(`SELECT id, delivery_number AS deliveryNumber, display_number AS orderNumber,
       delivery_status AS deliveryStatus, total_paise AS totalPaise FROM orders
       WHERE type='delivery' AND delivery_rider_id=? AND delivery_settled_at IS NULL AND voided_at IS NULL
+        AND delivery_status NOT IN ('cancelled','failed')
       ORDER BY created_at`).all(id) as OrderRow[]
     const bills = openOrders.map(order => ({ orderId: order.id,
       reference: order.deliveryNumber === null ? `#${order.orderNumber}` : `HD-${order.deliveryNumber}`,
@@ -120,8 +121,6 @@ export class DeliveryRunSettlements {
       const rider = this.rider(input.riderId)
       const state = this.state(actor, input.riderId)
       if (!state.bills.length && state.outstandingFloatPaise === 0) throw new Error('No open delivery bills or change money are assigned to this rider.')
-      if (state.bills.some(bill => bill.deliveryStatus !== 'delivered'))
-        throw new Error('All assigned delivery bills must be marked delivered before closing this rider run.')
       const billsPaise = state.bills.reduce((sum, bill) => sum + bill.balancePaise, 0)
       const expected = state.outstandingFloatPaise + billsPaise
       if (input.receivedPaise !== expected)
@@ -135,8 +134,14 @@ export class DeliveryRunSettlements {
         })
         this.db.prepare(`INSERT INTO delivery_run_settlement_items(settlement_id,order_id,reference,total_paise,cash_paise)
           VALUES(?,?,?,?,?)`).run(input.requestId, bill.orderId, bill.reference, bill.totalPaise, bill.balancePaise)
-        this.db.prepare(`UPDATE orders SET delivery_settled_at=datetime('now')
+        this.db.prepare(`UPDATE orders SET delivery_settled_at=datetime('now'),
+          delivery_status='delivered', delivered_at=COALESCE(delivered_at,datetime('now'))
           WHERE id=? AND delivery_settled_at IS NULL`).run(bill.orderId)
+        if (bill.deliveryStatus !== 'delivered') this.db.prepare(`INSERT INTO delivery_events
+          (id,order_id,event_type,previous_status,new_status,previous_rider_id,new_rider_id,
+            actor_id,actor,reason,details_json) VALUES(?,?,'delivered',?,'delivered',?,?,?,?,'run_settlement',?)`)
+          .run(randomUUID(), bill.orderId, bill.deliveryStatus, input.riderId, input.riderId,
+            actor.id, actor.username, JSON.stringify({ settlementId: input.requestId }))
       }
       this.db.prepare(`UPDATE delivery_float_issues SET settlement_id=? WHERE rider_id=? AND settlement_id IS NULL`)
         .run(input.requestId, input.riderId)

@@ -121,7 +121,6 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const canViewDeliveries = Boolean(staff && staffHasPermission(staff.role, 'delivery:view'))
   const canManageDeliveryRiders = Boolean(staff && staffHasPermission(staff.role, 'delivery:riders'))
   const canReassignDeliveries = Boolean(staff && staffHasPermission(staff.role, 'delivery:reassign'))
-  const canCancelDeliveries = Boolean(staff && staffHasPermission(staff.role, 'delivery:cancel'))
 
   async function refreshMenu(): Promise<MenuData> {
     const data = await loadMenu()
@@ -1403,7 +1402,6 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
         <DeliveryScheduleScreen
           canManageRiders={canManageDeliveryRiders}
           canReassign={canReassignDeliveries}
-          canCancel={canCancelDeliveries}
           onClose={() => void closeDeliverySchedule()}
         />
       )}

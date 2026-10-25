@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ArrowLeft, Ban, CalendarClock, Check, CircleAlert, Download, History, MapPin, Pencil,
+  ArrowLeft, Check, CircleAlert, Download, MapPin, Pencil,
   Phone, Plus, Printer, RefreshCw, Search, Truck, UserRound, Users, X,
 } from 'lucide-react'
 import type {
   DeliveryEvent,
   RiderRunState,
-  DeliveryOperation,
   DeliveryRider,
   DeliveryRiderInput,
   DeliveryScheduleEntry,
@@ -23,22 +22,17 @@ import {
   closeDeliveryRun,
   listDeliveryRiders,
   listDeliverySchedule,
-  operateDelivery,
   saveDeliveryRider,
-  updateDeliverySchedule,
 } from '../../services/pos'
 import { formatMoney } from '../../../shared/billing'
 import './delivery.css'
 
 type ScheduleFilter = 'all' | 'unassigned' | 'assigned' | 'dispatched' | 'delivered' | 'failed' | 'cancelled'
-type ConfirmAction = Extract<DeliveryOperation, { kind: 'ready_for_pickup' | 'dispatch' | 'delivered' }>['kind']
-type ReasonAction = Extract<DeliveryOperation, { kind: 'failed' | 'cancelled' }>['kind']
 type RiderEditor = DeliveryRider | 'new' | null
 
 interface DeliveryScheduleScreenProps {
   canManageRiders: boolean
   canReassign: boolean
-  canCancel: boolean
   onClose: () => void
 }
 
@@ -49,12 +43,6 @@ function dateValue(value: string | null): Date | null {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function localDateTimeValue(value: string | null): string {
-  const date = dateValue(value)
-  if (!date) return ''
-  const pad = (part: number) => String(part).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
 
 function displayDate(value: string | null): string {
   const date = dateValue(value)
@@ -80,14 +68,10 @@ function statusLabel(status: DeliveryScheduleEntry['deliveryStatus'], foodStatus
   })[status]
 }
 
-function dateInputToIso(value: string): string | null {
-  return value ? new Date(value).toISOString() : null
-}
 
 export function DeliveryScheduleScreen({
   canManageRiders,
   canReassign,
-  canCancel,
   onClose,
 }: DeliveryScheduleScreenProps) {
   const [entries, setEntries] = useState<DeliveryScheduleEntry[]>([])
@@ -130,12 +114,6 @@ export function DeliveryScheduleScreen({
   const [riderAvailability, setRiderAvailability] = useState<RiderAvailability>('available')
   const [riderCapacity, setRiderCapacity] = useState('5')
   const [riderActive, setRiderActive] = useState(true)
-  const [scheduleOrder, setScheduleOrder] = useState<DeliveryScheduleEntry | null>(null)
-  const [pickupTime, setPickupTime] = useState('')
-  const [promiseTime, setPromiseTime] = useState('')
-  const [confirmAction, setConfirmAction] = useState<{ order: DeliveryScheduleEntry; kind: ConfirmAction } | null>(null)
-  const [reasonAction, setReasonAction] = useState<{ order: DeliveryScheduleEntry; kind: ReasonAction } | null>(null)
-  const [reasonText, setReasonText] = useState('')
   const [now, setNow] = useState(() => new Date())
 
   async function refresh(showLoading = true): Promise<void> {
@@ -236,8 +214,7 @@ export function DeliveryScheduleScreen({
   const settlement = riderSettlementSummary(entries, settlementRiderId, settlementFrom, settlementTo)
   const openBillCashPaise = runState?.bills.reduce((sum, bill) => sum + bill.balancePaise, 0) ?? 0
   const expectedReturnPaise = (runState?.outstandingFloatPaise ?? 0) + openBillCashPaise
-  const returnReady = Boolean(runState && (runState.bills.length || runState.outstandingFloatPaise)
-    && runState.bills.every(bill => bill.deliveryStatus === 'delivered'))
+  const returnReady = Boolean(runState && (runState.bills.length || runState.outstandingFloatPaise))
 
   async function issueFloat(): Promise<void> {
     const amountPaise = cashPaise(floatAmount)
@@ -346,24 +323,6 @@ export function DeliveryScheduleScreen({
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  async function runOperation(order: DeliveryScheduleEntry, operation: DeliveryOperation): Promise<void> {
-    if (busyOrderId) return
-    setBusyOrderId(order.id)
-    setError('')
-    setNotice('')
-    try {
-      await operateDelivery(operation)
-      setNotice(`${order.reference}: ${operation.kind.replaceAll('_', ' ')} saved.`)
-      setConfirmAction(null)
-      setReasonAction(null)
-      setReasonText('')
-      await refresh()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Delivery update failed. Refresh and retry.')
-    } finally {
-      setBusyOrderId(null)
-    }
-  }
 
   async function saveAssignment(): Promise<void> {
     if (!assignOrder || !selectedRiderId || busyOrderId) return
@@ -423,31 +382,6 @@ export function DeliveryScheduleScreen({
     }
   }
 
-  async function saveSchedule(): Promise<void> {
-    if (!scheduleOrder || busyOrderId) return
-    setBusyOrderId(scheduleOrder.id)
-    setError('')
-    try {
-      await updateDeliverySchedule({
-        orderId: scheduleOrder.id,
-        scheduledPickupAt: dateInputToIso(pickupTime),
-        promisedDeliveryAt: dateInputToIso(promiseTime),
-      })
-      setNotice(`${scheduleOrder.reference} schedule saved.`)
-      setScheduleOrder(null)
-      await refresh()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Schedule could not be saved.')
-    } finally {
-      setBusyOrderId(null)
-    }
-  }
-
-  function openSchedule(entry: DeliveryScheduleEntry): void {
-    setScheduleOrder(entry)
-    setPickupTime(localDateTimeValue(entry.scheduledPickupAt))
-    setPromiseTime(localDateTimeValue(entry.promisedDeliveryAt))
-  }
 
   const currentAssigneeId = assignOrder?.rider?.id ?? ''
   const reassigning = Boolean(currentAssigneeId && selectedRiderId && currentAssigneeId !== selectedRiderId)
@@ -539,24 +473,12 @@ export function DeliveryScheduleScreen({
                     <td>{entry.rider?.name ?? (entry.assignedDeliveryTo ? `Unverified: ${entry.assignedDeliveryTo}` : 'Unassigned')}<small>{entry.rider ? `${entry.rider.contactNumber || 'No staff phone'} · Assigned ${displayDate(entry.assignedAt)}` : ''}</small></td>
                     <td><span className={`delivery-status-badge ${entry.deliveryStatus}`}>{statusLabel(entry.deliveryStatus, entry.foodStatus)}</span><small>{formatMoney(entry.totalPaise)} · {entry.paymentStatus}</small></td>
                     <td className="delivery-row-actions">
-                      <button title="View order and history" aria-label={`View ${entry.reference}`} onClick={() => setSelectedOrder(entry)}><History size={14} /></button>
-                      <button title="Edit schedule" aria-label={`Edit schedule ${entry.reference}`} onClick={() => openSchedule(entry)} disabled={['delivered', 'cancelled'].includes(entry.deliveryStatus)}><CalendarClock size={14} /></button>
-                      {entry.foodStatus !== 'ready' && !['delivered', 'cancelled'].includes(entry.deliveryStatus) && (
-                        <button title="Mark ready for pickup" onClick={() => setConfirmAction({ order: entry, kind: 'ready_for_pickup' })}>Ready</button>
-                      )}
                       {canAssign && <button title={entry.rider ? 'Reassign rider' : 'Assign rider'} onClick={() => {
                         setAssignOrder(entry)
                         setSelectedRiderId(entry.rider?.id ?? '')
                         setAssignmentReason('')
                         setRiderSearch('')
                       }}>{entry.rider ? 'Reassign' : 'Assign'}</button>}
-                      {entry.deliveryStatus === 'assigned' && <button title={entry.foodStatus === 'ready' ? 'Mark dispatched' : 'Mark food ready before dispatch'} disabled={entry.foodStatus !== 'ready'} onClick={() => setConfirmAction({ order: entry, kind: 'dispatch' })}>Dispatch</button>}
-                      {entry.deliveryStatus === 'dispatched' && <>
-                        <button title="Mark delivered" onClick={() => setConfirmAction({ order: entry, kind: 'delivered' })}>Delivered</button>
-                        <button title="Record delivery failure" onClick={() => { setReasonAction({ order: entry, kind: 'failed' }); setReasonText('') }}>Failed</button>
-                      </>}
-                      {canCancel && !['delivered', 'cancelled'].includes(entry.deliveryStatus)
-                        && <button title="Cancel delivery" onClick={() => { setReasonAction({ order: entry, kind: 'cancelled' }); setReasonText('') }}><Ban size={14} /></button>}
                     </td>
                   </tr>
                 )
@@ -569,7 +491,7 @@ export function DeliveryScheduleScreen({
       {batchAssignOpen && <div className="delivery-modal-backdrop" role="presentation">
         <section className="delivery-modal delivery-run-modal" role="dialog" aria-modal="true" aria-labelledby="delivery-run-title">
           <header><div><span className="delivery-action-icon"><Truck size={19} /></span><h2 id="delivery-run-title">Assign delivery run</h2></div><button onClick={() => setBatchAssignOpen(false)} aria-label="Close delivery run"><X size={18} /></button></header>
-          <p>Select the delivery boy, then tick each HD bill for this run. All assignments save together when you press Done. Mark food Ready before dispatch.</p>
+          <p>Select the delivery boy, then tick each HD bill for this run. All assignments save together when you press Done.</p>
           <label className="delivery-modal-field"><span>Delivery staff</span><select value={batchRiders.some(rider => rider.id === batchRiderId) ? batchRiderId : ''} onChange={event => setBatchRiderId(event.target.value)}><option value="">Select staff</option>{batchRiders.map(rider => <option key={rider.id} value={rider.id}>{rider.name} · {rider.contactNumber || 'No phone'} · {rider.maxActiveDeliveries - rider.activeDeliveryCount} spaces</option>)}</select></label>
           {batchRiders.length === 0 && <p>No rider has space for {batchOrderIds.length || 1} bills. Edit the rider’s maximum active deliveries first.</p>}
           <div className="delivery-run-list">
@@ -592,11 +514,11 @@ export function DeliveryScheduleScreen({
           </div>
           {settlementRider && <>
             <div className="delivery-settlement-totals"><div><small>Assigned bills</small><b>{settlement.assignedCount}</b></div><div><small>Delivered</small><b>{settlement.deliveredCount}</b></div><div><small>Out now</small><b>{settlement.outForDeliveryCount}</b></div><div><small>Bill value</small><b>{formatMoney(settlement.invoicePaise)}</b></div><div><small>Recorded payments</small><b>{formatMoney(settlement.collectedPaise)}</b></div><div><small>Balance to reconcile</small><b>{formatMoney(settlement.balancePaise)}</b></div></div>
-            <p>Delivered bills with a balance: <b>{formatMoney(settlement.deliveredBalancePaise)}</b>. HD cards stay occupied until this rider run is settled.</p>
+            <p>HD cards stay occupied until this rider run is settled. At closing, the assigned bills are marked delivered and paid.</p>
             <div className="delivery-settlement-table-wrap"><table className="delivery-settlement-table"><thead><tr><th>Bill / assigned</th><th>Customer / location</th><th>Status</th><th>Payment</th><th>Amount / balance</th></tr></thead><tbody>{settlement.bills.map(entry => <tr key={entry.id}><td><button className="delivery-order-reference" onClick={() => { setSettlementOpen(false); setSelectedOrder(entry) }}>{entry.reference}</button><small>{displayDate(entry.assignedAt)}</small></td><td>{entry.customerName || 'Customer'}<small>{entry.contactNumber || 'No phone'} · {[entry.deliveryArea, entry.deliveryLandmark, entry.deliveryAddress].filter(Boolean).join(' · ')}</small></td><td>{statusLabel(entry.deliveryStatus, entry.foodStatus)}</td><td>{entry.paymentStatus}</td><td>{formatMoney(entry.totalPaise)}<small>Balance {formatMoney(entry.balancePaise)}</small></td></tr>)}{settlement.bills.length === 0 && <tr><td colSpan={5} className="delivery-schedule-empty">No bills assigned to this staff member in this period.</td></tr>}</tbody></table></div>
             <section className="delivery-handover-section" aria-labelledby="delivery-handover-title">
               <h3 id="delivery-handover-title">Rider cash and run settlement</h3>
-              <p>Give the rider change money before leaving. After all deliveries are marked delivered, count the cash returned. Closing the whole run records each unpaid bill and clears its HD card.</p>
+              <p>Give the rider change money before leaving. When the rider returns, count the cash and close all assigned HD bills together.</p>
               <div className="delivery-settlement-totals">
                 <div><small>Change money issued</small><b>{formatMoney(runState?.outstandingFloatPaise ?? 0)}</b></div>
                 <div><small>Unpaid bills</small><b>{formatMoney(openBillCashPaise)}</b></div>
@@ -609,9 +531,9 @@ export function DeliveryScheduleScreen({
               {runState?.bills.length ? <ul>{runState.bills.map(bill => <li key={bill.orderId}>{bill.reference} · {bill.deliveryStatus} · bill {formatMoney(bill.totalPaise)} · cash balance {formatMoney(bill.balancePaise)}</li>)}</ul> : <p>No open bills assigned to this rider.</p>}
               <label className="delivery-modal-field"><span>Cash received from rider, including returned change money (₹)</span><input type="text" inputMode="decimal" value={receivedAmount} onChange={event => setReceivedAmount(event.target.value)} placeholder="0.00" disabled={handoverBusy} /></label>
               <label className="delivery-modal-field"><span>Note (optional)</span><input value={handoverNotes} maxLength={250} onChange={event => setHandoverNotes(event.target.value)} placeholder="Cash count or run note" disabled={handoverBusy} /></label>
-              {!returnReady && Boolean(runState?.bills.length) && <p role="status">Mark every open bill delivered before closing this run.</p>}
+              {returnReady && !receivedAmount.trim() && <p role="status">Enter the cash actually received to enable closing this run.</p>}
               {receivedAmount.trim() && Number.isFinite(cashPaise(receivedAmount)) && cashPaise(receivedAmount) !== expectedReturnPaise && <p role="alert" className="delivery-handover-error">Received cash differs from expected by {formatMoney(Math.abs(cashPaise(receivedAmount) - expectedReturnPaise))}. Recount or record any card or UPI payment before closing.</p>}
-              <div className="delivery-handover-confirm"><b>Expected return: {formatMoney(expectedReturnPaise)}</b><button onClick={() => void closeRun()} disabled={!returnReady || !receivedAmount.trim() || cashPaise(receivedAmount) !== expectedReturnPaise || handoverBusy}>{handoverBusy ? 'Closing…' : 'Close all delivered bills'}</button></div>
+              <div className="delivery-handover-confirm"><b>Expected return: {formatMoney(expectedReturnPaise)}</b><button onClick={() => void closeRun()} disabled={!returnReady || !receivedAmount.trim() || cashPaise(receivedAmount) !== expectedReturnPaise || handoverBusy}>{handoverBusy ? 'Closing…' : 'Close all assigned bills'}</button></div>
               {handoverError && <p role="alert" className="delivery-handover-error">{handoverError}</p>}
               {handoverNotice && <p role="status" className="delivery-handover-notice">{handoverNotice}</p>}
             </section>
@@ -646,14 +568,6 @@ export function DeliveryScheduleScreen({
         </section>
       </div>}
 
-      {scheduleOrder && <div className="delivery-modal-backdrop" role="presentation">
-        <section className="delivery-modal delivery-schedule-edit" role="dialog" aria-modal="true" aria-labelledby="delivery-time-title">
-          <header><div><span className="delivery-action-icon"><CalendarClock size={19} /></span><h2 id="delivery-time-title">Delivery times · {scheduleOrder.reference}</h2></div><button onClick={() => setScheduleOrder(null)} aria-label="Close schedule"><X size={18} /></button></header>
-          <label className="delivery-modal-field"><span>Scheduled pickup time</span><input type="datetime-local" value={pickupTime} onChange={(event) => setPickupTime(event.target.value)} /></label>
-          <label className="delivery-modal-field"><span>Promised delivery time</span><input type="datetime-local" value={promiseTime} onChange={(event) => setPromiseTime(event.target.value)} /></label>
-          <footer><button onClick={() => setScheduleOrder(null)}>Cancel</button><button className="primary" onClick={() => void saveSchedule()} disabled={Boolean(busyOrderId)}>{busyOrderId === scheduleOrder.id ? 'Saving…' : 'Save times'}</button></footer>
-        </section>
-      </div>}
 
       {riderEditor && <div className="delivery-modal-backdrop" role="presentation">
         <section className="delivery-modal delivery-rider-editor" role="dialog" aria-modal="true" aria-labelledby="delivery-rider-title">
@@ -668,19 +582,6 @@ export function DeliveryScheduleScreen({
         </section>
       </div>}
 
-      {confirmAction && <div className="delivery-modal-backdrop" role="presentation"><section className="delivery-modal delivery-confirm-modal" role="dialog" aria-modal="true">
-        <header><div><span className="delivery-action-icon"><CircleAlert size={19} /></span><h2>Confirm delivery update</h2></div><button onClick={() => setConfirmAction(null)} aria-label="Close confirmation"><X size={18} /></button></header>
-        <p>{confirmAction.order.reference}: {confirmAction.kind.replaceAll('_', ' ')}?</p>
-        {confirmAction.kind === 'delivered' && <p>Delivery completion will not record payment or change the invoice total.</p>}
-        <footer><button onClick={() => setConfirmAction(null)}>Go back</button><button className="primary" onClick={() => void runOperation(confirmAction.order, { kind: confirmAction.kind, orderId: confirmAction.order.id })} disabled={Boolean(busyOrderId)}>{busyOrderId === confirmAction.order.id ? 'Saving…' : 'Confirm'}</button></footer>
-      </section></div>}
-
-      {reasonAction && <div className="delivery-modal-backdrop" role="presentation"><section className="delivery-modal delivery-confirm-modal" role="dialog" aria-modal="true">
-        <header><div><span className="delivery-action-icon"><CircleAlert size={19} /></span><h2>{reasonAction.kind === 'failed' ? 'Record delivery failure' : 'Cancel delivery'}</h2></div><button onClick={() => setReasonAction(null)} aria-label="Close"><X size={18} /></button></header>
-        <p>{reasonAction.order.reference} · Reason is required and will be kept in the delivery history.</p>
-        <label className="delivery-modal-field"><span>Reason</span><textarea value={reasonText} onChange={(event) => setReasonText(event.target.value)} rows={3} maxLength={250} autoFocus /></label>
-        <footer><button onClick={() => setReasonAction(null)}>Go back</button><button className="primary" onClick={() => void runOperation(reasonAction.order, { kind: reasonAction.kind, orderId: reasonAction.order.id, reason: reasonText.trim() })} disabled={reasonText.trim().length < 3 || Boolean(busyOrderId)}>{busyOrderId === reasonAction.order.id ? 'Saving…' : 'Save status'}</button></footer>
-      </section></div>}
 
       {selectedOrder && <div className="delivery-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedOrder(null) }}>
         <section className="delivery-modal delivery-order-details" role="dialog" aria-modal="true" aria-labelledby="delivery-details-title">

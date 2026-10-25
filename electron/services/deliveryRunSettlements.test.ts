@@ -47,8 +47,8 @@ beforeEach(() => {
 afterEach(() => { backend.close(); rmSync(directory, { recursive: true, force: true }) })
 
 it('issues change money, then closes two HD bills atomically and frees their cards', () => {
-  const hd1 = createDelivery(1)
-  const hd5 = createDelivery(5)
+  const hd1 = createDelivery(1, false)
+  const hd5 = createDelivery(5, false)
   const float = { requestId: randomUUID(), riderId, amountPaise: 50000, notes: 'Change for customers' }
   expect(() => backend.invoke('delivery:issue-float', 3, float)).toThrow('permission')
   expect(backend.invoke('delivery:issue-float', 2, float)).toMatchObject({ riderId, amountPaise: 50000 })
@@ -73,17 +73,17 @@ it('issues change money, then closes two HD bills atomically and frees their car
   expect(() => createDelivery(1)).not.toThrow()
 })
 
-it('keeps a paid HD card until settlement and blocks closure while another bill is in flight', () => {
+it('closes assigned bills directly without ready, dispatch, or delivered steps', () => {
   const hd1 = createDelivery(1)
   const hd5 = createDelivery(5, false)
   backend.invoke('payments:collect', 1, { requestId: randomUUID(), orderId: hd1.id, method: 'upi' })
   expect((backend.invoke('pos:load-menu', 1) as MenuData).activeOrders.some(order => order.id === hd1.id)).toBe(true)
-  const close = { requestId: randomUUID(), riderId, receivedPaise: 0, notes: '' }
-  expect(() => backend.invoke('delivery:close-run', 1, close)).toThrow('marked delivered')
-  backend.invoke('delivery:operate', 1, { kind: 'ready_for_pickup', orderId: hd5.id })
-  backend.invoke('delivery:operate', 1, { kind: 'dispatch', orderId: hd5.id })
-  backend.invoke('delivery:operate', 1, { kind: 'delivered', orderId: hd5.id })
-  backend.invoke('delivery:close-run', 1, { ...close, receivedPaise: hd5.totalPaise })
+  const close = { requestId: randomUUID(), riderId, receivedPaise: hd5.totalPaise, notes: '' }
+  backend.invoke('delivery:close-run', 1, close)
+  const schedule = backend.invoke('delivery:list-schedule', 1) as { id: string; deliveryStatus: string; deliveredAt: string | null }[]
+  expect(schedule.find(order => order.id === hd5.id)).toMatchObject({ deliveryStatus: 'delivered' })
+  expect(schedule.find(order => order.id === hd5.id)?.deliveredAt).toBeTruthy()
+  expect((backend.invoke('pos:load-menu', 1) as MenuData).activeOrders.some(order => order.id === hd5.id)).toBe(false)
   expect(backend.invoke('cash:summary', 1)).toMatchObject({ receiptsPaise: hd5.totalPaise })
 })
 
