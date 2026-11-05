@@ -10,7 +10,7 @@ import { DesktopPrintWorker, PrintOutcomeUnknown, type PrintAttempt } from './se
 import { printDocument } from './services/printDocument.cjs'
 import type { posChannels } from '../shared/posChannels.js'
 
-const schema = z.object({ bill: z.string().max(250), kot: z.string().max(250), restaurant: z.string().trim().max(120), branch: z.string().trim().max(120) }).strict()
+const schema = z.object({ bill: z.string().max(250), kot: z.string().max(250), restaurant: z.string().trim().max(120), branch: z.string().trim().max(120), paperWidth: z.enum(['default', '58mm', '80mm']).default('default') }).strict()
 type Invoke = (channel: typeof posChannels[keyof typeof posChannels], senderId: number, input?: unknown) => unknown
 export function desktopPrinting(window: BrowserWindow, directory: string, scope: string, invoke: Invoke) {
   mkdirSync(directory, { recursive: true })
@@ -18,7 +18,7 @@ export function desktopPrinting(window: BrowserWindow, directory: string, scope:
   const path = join(directory, `printing-${key}.json`)
   const id = window.webContents.id
   let state: { deviceId: string; settings: PrinterSettings; pending: PrintAttempt | null; requests: Record<string, PrintRequest> } = {
-    deviceId: randomUUID(), settings: { bill: '', kot: '', restaurant: '', branch: '' }, pending: null, requests: {},
+    deviceId: randomUUID(), settings: { bill: '', kot: '', restaurant: '', branch: '', paperWidth: 'default' }, pending: null, requests: {},
   }
   if (existsSync(path)) {
     const saved = JSON.parse(readFileSync(path, 'utf8')) as typeof state

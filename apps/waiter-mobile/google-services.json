@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "934906179609",
+    "project_id": "billmitra-staff",
+    "storage_bucket": "billmitra-staff.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:934906179609:android:8fa6ad30105362dec4ba88",
+        "android_client_info": {
+          "package_name": "com.billmitra.waiter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBBjEAgHJJNasJzisf_cLn6Xed4nGKtxKs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

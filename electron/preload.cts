@@ -23,6 +23,8 @@ import type {
   DeliveryScheduleEntry,
   DeliveryScheduleInput,
   SavedDeliveryCustomerDetails,
+  DeliveryCustomerRecord,
+  SaveDeliveryCustomerInput,
   SplitOrderInput,
   SplitOrderResult,
   JoinOrdersInput,
@@ -41,12 +43,15 @@ const api = {
   moveStock: (input: unknown) => ipcRenderer.invoke('inventory:move-stock', input),
   getStockHistory: (input: string) => ipcRenderer.invoke('inventory:history', input),
   getCashSummary: () => ipcRenderer.invoke('cash:summary'),
+  openCash: (input: unknown) => ipcRenderer.invoke('cash:open', input),
   closeCash: (input: unknown) => ipcRenderer.invoke('cash:close', input),
   getKitchenQueue: () => ipcRenderer.invoke('kitchen:queue'),
   updateKitchenStatus: (input: unknown) => ipcRenderer.invoke('kitchen:update', input),
   getMenuCatalog: () => ipcRenderer.invoke('menu:catalog'),
   saveCategory: (input: unknown) => ipcRenderer.invoke('menu:save-category', input),
   saveProduct: (input: unknown) => ipcRenderer.invoke('menu:save-product', input),
+  addTable: (input: unknown) => ipcRenderer.invoke('tables:add', input),
+  saveCardSettings: (input: unknown) => ipcRenderer.invoke('cards:save-settings', input),
   getSalesReport: (input: unknown) => ipcRenderer.invoke('reports:sales', input),
   getStaffAccessState: (): Promise<StaffAccessState> => ipcRenderer.invoke('staff:get-access-state'),
   setupOwner: (input: OwnerSetupInput): Promise<StaffIdentity> => ipcRenderer.invoke('staff:setup-owner', input),
@@ -54,6 +59,7 @@ const api = {
   logoutStaff: (): Promise<void> => ipcRenderer.invoke('staff:logout'),
   listStaff: (): Promise<StaffIdentity[]> => ipcRenderer.invoke('staff:list'),
   createStaff: (input: CreateStaffInput): Promise<StaffIdentity> => ipcRenderer.invoke('staff:create', input),
+  resetManagerPassword: (input: { staffId: string; password: string }): Promise<void> => ipcRenderer.invoke('staff:reset-manager-password', input),
   loadMenu: (): Promise<MenuData> => ipcRenderer.invoke('pos:load-menu'),
   createOrder: (input: CreateOrderInput): Promise<SavedOrder> =>
     ipcRenderer.invoke('pos:create-order', input),
@@ -67,6 +73,10 @@ const api = {
     ipcRenderer.invoke('pos:manager-pin-configured'),
   setManagerPin: (pin: string): Promise<void> =>
     ipcRenderer.invoke('pos:set-manager-pin', pin),
+  authorizeManagement: (pin: string): Promise<void> =>
+    ipcRenderer.invoke('pos:authorize-management', pin),
+  resetManagerPin: (input: { ownerPassword: string; pin: string }): Promise<void> =>
+    ipcRenderer.invoke('pos:reset-manager-pin', input),
   voidOrder: (input: { orderId: string; pin: string; reason: string }): Promise<SavedOrder> =>
     ipcRenderer.invoke('pos:void-order', input),
   voidOrderItem: (input: { orderId: string; itemId: string; quantity: number; pin: string; reason: string }): Promise<SavedOrder> =>
@@ -80,6 +90,10 @@ const api = {
     ipcRenderer.invoke('delivery:list-schedule'),
   findSavedDeliveryCustomer: (contactNumber: string): Promise<SavedDeliveryCustomerDetails | null> =>
     ipcRenderer.invoke('delivery:find-customer', contactNumber),
+  listDeliveryCustomers: (query: string): Promise<DeliveryCustomerRecord[]> =>
+    ipcRenderer.invoke('delivery:list-customers', query),
+  saveDeliveryCustomer: (input: SaveDeliveryCustomerInput): Promise<DeliveryCustomerRecord> =>
+    ipcRenderer.invoke('delivery:save-customer', input),
   listDeliveryRiders: (): Promise<DeliveryRider[]> =>
     ipcRenderer.invoke('delivery:list-riders'),
   saveDeliveryRider: (input: DeliveryRiderInput): Promise<DeliveryRider> =>
@@ -100,6 +114,8 @@ const api = {
     ipcRenderer.invoke('delivery:issue-float', input),
   closeDeliveryRun: (input: { requestId: string; riderId: string; receivedPaise: number; notes: string }): Promise<DeliveryRunSettlement> =>
     ipcRenderer.invoke('delivery:close-run', input),
+  cashOutDelivery: (input: { requestId: string; orderId: string; pin: string; expectedBalancePaise: number }): Promise<{ order: SavedOrder; collectedPaise: number }> =>
+    ipcRenderer.invoke('delivery:cash-out', input),
   operateDelivery: (input: DeliveryOperation): Promise<void> =>
     ipcRenderer.invoke('delivery:operate', input),
   listDeliveryEvents: (orderId: string): Promise<DeliveryEvent[]> =>

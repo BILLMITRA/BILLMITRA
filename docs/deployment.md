@@ -1,6 +1,6 @@
 # Online deployment preparation
 
-No hosting account, domain, certificate, or public deployment has been created. The Docker and Caddy files are a deployment starter and have not been executed in this Windows environment, which does not have Docker available.
+`billmitra.shop` is registered at GoDaddy and its DNS is active on Cloudflare. `mobile.billmitra.shop` is a named Cloudflare Tunnel to the filtered waiter/kitchen mobile API on the Vengara restaurant PC. This is a pilot phone connection, not a cloud host for the full POS or nine-outlet system. The PC and its MySQL and BillMitra processes must remain running. The Docker and Caddy files are a separate cloud deployment starter and have not been executed in this Windows environment, which does not have Docker available.
 
 ## Requirements
 

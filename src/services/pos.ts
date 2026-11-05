@@ -17,6 +17,8 @@ import type {
   DeliveryScheduleEntry,
   DeliveryScheduleInput,
   SavedDeliveryCustomerDetails,
+  DeliveryCustomerRecord,
+  SaveDeliveryCustomerInput,
   SplitOrderInput,
   JoinOrdersInput,
 } from '../../shared/domain'
@@ -33,11 +35,14 @@ export const saveInventoryItem: Window['pos']['saveInventoryItem'] = input => po
 export const moveStock: Window['pos']['moveStock'] = input => posApi.moveStock(input)
 export const getStockHistory: Window['pos']['getStockHistory'] = input => posApi.getStockHistory(input)
 export const getCashSummary = () => posApi.getCashSummary()
+export const openCash: Window['pos']['openCash'] = input => posApi.openCash(input)
 export const closeCash: Window['pos']['closeCash'] = input => posApi.closeCash(input)
 export const getKitchenQueue = () => posApi.getKitchenQueue()
 export const updateKitchenStatus: Window['pos']['updateKitchenStatus'] = input => posApi.updateKitchenStatus(input)
 export const getMenuCatalog = () => posApi.getMenuCatalog()
 export const saveCategory: Window['pos']['saveCategory'] = input => posApi.saveCategory(input)
+export const addTable: Window['pos']['addTable'] = input => posApi.addTable(input)
+export const saveCardSettings: Window['pos']['saveCardSettings'] = input => posApi.saveCardSettings(input)
 export const saveProduct: Window['pos']['saveProduct'] = input => posApi.saveProduct(input)
 export const getSalesReport: Window['pos']['getSalesReport'] = input => posApi.getSalesReport(input)
 
@@ -63,6 +68,10 @@ export function listStaff() {
 
 export function createStaff(input: CreateStaffInput) {
   return posApi.createStaff(input)
+}
+
+export function resetManagerPassword(input: { staffId: string; password: string }) {
+  return posApi.resetManagerPassword(input)
 }
 
 export function loadMenu() {
@@ -93,6 +102,14 @@ export function setManagerPin(pin: string) {
   return posApi.setManagerPin(pin)
 }
 
+export function authorizeManagement(pin: string) {
+  return posApi.authorizeManagement(pin)
+}
+
+export function resetManagerPin(input: { ownerPassword: string; pin: string }) {
+  return posApi.resetManagerPin(input)
+}
+
 export function voidOrder(input: { orderId: string; pin: string; reason: string }) {
   return posApi.voidOrder(input)
 }
@@ -119,6 +136,14 @@ export function listDeliverySchedule(): Promise<DeliveryScheduleEntry[]> {
 
 export function findSavedDeliveryCustomer(contactNumber: string): Promise<SavedDeliveryCustomerDetails | null> {
   return posApi.findSavedDeliveryCustomer(contactNumber)
+}
+
+export function listDeliveryCustomers(query: string): Promise<DeliveryCustomerRecord[]> {
+  return posApi.listDeliveryCustomers(query)
+}
+
+export function saveDeliveryCustomer(input: SaveDeliveryCustomerInput): Promise<DeliveryCustomerRecord> {
+  return posApi.saveDeliveryCustomer(input)
 }
 
 export function listDeliveryRiders(): Promise<DeliveryRider[]> {
@@ -159,6 +184,10 @@ export function issueDeliveryFloat(input: { requestId: string; riderId: string; 
 
 export function closeDeliveryRun(input: { requestId: string; riderId: string; receivedPaise: number; notes: string }): Promise<DeliveryRunSettlement> {
   return posApi.closeDeliveryRun(input)
+}
+
+export function cashOutDelivery(input: { requestId: string; orderId: string; pin: string; expectedBalancePaise: number }): Promise<{ order: import('../../shared/domain').SavedOrder; collectedPaise: number }> {
+  return posApi.cashOutDelivery(input)
 }
 
 export function operateDelivery(input: DeliveryOperation): Promise<void> {

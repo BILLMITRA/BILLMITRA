@@ -1,8 +1,8 @@
-.management-shell { position: fixed; inset: 0; z-index: 50; overflow-y: auto; padding: 28px; background: #f5f7f5; color: #293a30; font: 14px/1.5 sans-serif; }
+.management-shell { position: fixed; inset: 0; z-index: 50; overflow-y: auto; padding: 28px; background: #f8f7f7; color: #293a30; font: 14px/1.5 sans-serif; }
 .management-header, .management-tabs, .management-form-row, .management-report-filter, .management-report-summary { display: flex; gap: 14px; align-items: center; justify-content: space-between; }
 .management-header h1 { margin: 2px 0; font-size: 25px; }
 .management-header p, .management-card p { margin: 4px 0 16px; color: #66766b; }
-.management-header span { color: #27704d; font-weight: 700; }
+.management-header span { color: #b33732; font-weight: 700; }
 .management-tabs { justify-content: flex-start; margin: 24px 0; border-bottom: 1px solid #dce5dd; padding-bottom: 14px; }
 .management-tabs { flex-wrap: wrap; }
 .management-kitchen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap: 20px; }
@@ -11,16 +11,18 @@
 .management-waiter-menu { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap: 12px; margin-top: 18px; }
 .management-waiter-menu button { display: grid; gap: 6px; text-align: left; }
 .branch-error { position: fixed; z-index: 100; bottom: 16px; right: 16px; max-width: 400px; padding: 14px; color: #922c24; background: #fff2ef; border: 1px solid #eac4be; border-radius: 8px; }
-.branch-switch-button { position: fixed; z-index: 90; bottom: 16px; left: 16px; padding: 10px 14px; border: 1px solid #cbd9ce; border-radius: 7px; background: white; color: #28553c; cursor: pointer; }
+.branch-switch-button { position: fixed; z-index: 90; bottom: 16px; left: 16px; padding: 10px 14px; border: 1px solid #ead6d3; border-radius: 7px; background: white; color: #a72f2a; cursor: pointer; }
 @media print { .branch-switch-button, .branch-error { display: none; } }
-.management-shell button { cursor: pointer; padding: 9px 14px; border: 1px solid #cbd9ce; border-radius: 7px; background: white; color: #28553c; font: inherit; }
-.management-shell button[aria-pressed=true], .management-shell button[type=submit] { background: #246b49; color: white; }
+.management-shell button { cursor: pointer; padding: 9px 14px; border: 1px solid #ead6d3; border-radius: 7px; background: white; color: #a72f2a; font: inherit; }
+.management-shell button[aria-pressed=true], .management-shell button[type=submit] { border-color: #b33732; background: #b33732; color: white; }
 .management-shell button:disabled { opacity: .5; cursor: wait; }
 .management-columns { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, 1fr); gap: 24px; align-items: start; }
-.management-card { padding: 20px; border: 1px solid #dce6de; border-radius: 12px; background: white; min-width: 0; }
+.management-card { padding: 20px; border: 1px solid #eee0de; border-radius: 12px; background: white; min-width: 0; }
 .management-card h2 { font-size: 18px; margin: 0 0 18px; }
 .management-shell label { display: grid; gap: 6px; font-size: 13px; }
-.management-shell input:not([type=checkbox]), .management-shell select, .management-shell textarea { box-sizing: border-box; width: 100%; min-height: 38px; border: 1px solid #cbd9ce; border-radius: 6px; padding: 8px 10px; background: white; color: #293a30; font: inherit; }
+.management-shell input:not([type=checkbox]), .management-shell select, .management-shell textarea { box-sizing: border-box; width: 100%; min-height: 38px; border: 1px solid #e5d8d5; border-radius: 6px; padding: 8px 10px; background: white; color: #293a30; font: inherit; }
+.management-shell input:focus-visible, .management-shell select:focus-visible, .management-shell textarea:focus-visible { outline: 3px solid #f3cfca; border-color: #b33732; }
+.management-shell input[type=checkbox] { accent-color: #b33732; }
 .management-shell fieldset, .management-forms { display: grid; gap: 16px; border: 0; margin: 0; padding: 0; min-width: 0; }
 .management-form-row > label { flex: 1; }
 .management-shell .management-checkbox { display: flex; align-items: center; }
@@ -30,11 +32,129 @@
 .management-shell td small { display: block; color: #78857c; }
 .management-error, .management-notice { border: 1px solid; border-radius: 8px; padding: 12px; }
 .management-error { color: #9b3028; background: #fff2ef; border-color: #eac4be; }
+.management-open-orders { display: grid; justify-items: start; gap: 7px; margin: 0 0 18px; padding: 14px 16px; border: 1px solid #e8bdb9; border-radius: 9px; background: #fff7f6; color: #593a37; }
+.management-open-orders strong { color: #a72f2a; }
+.management-open-orders span { font-size: 12px; }
+.management-shell .management-open-orders button { margin-top: 3px; border-color: #b33732; background: #b33732; color: #fff; }
 .management-notice { color: #22603f; background: #eaf7ed; border-color: #c1e3cc; }
 .management-report-filter { justify-content: flex-start; align-items: end; flex-wrap: wrap; }
 .management-report-summary { margin-top: 20px; }
 .management-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 22px 0; }
-.management-metrics article { padding: 18px; border: 1px solid #dce6de; border-radius: 10px; background: white; display: grid; gap: 8px; }
+.management-metrics article { padding: 18px; border: 1px solid #eee0de; border-radius: 10px; background: white; display: grid; gap: 8px; }
 .management-metrics span { color: #66766b; font-size: 12px; }
 .management-metrics b { font-size: 22px; }
+.appearance-settings { max-width: 680px; }
+.appearance-options { display: flex; gap: 14px; flex-wrap: wrap; }
+.appearance-options button { min-width: 150px; min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 700; }
+.appearance-options button span { font-size: 20px; }
+
+html.billmitra-dark-mode .management-shell { background: #171a1c; color: #edf1ef; }
+html.billmitra-dark-mode .management-header p,
+html.billmitra-dark-mode .management-card p,
+html.billmitra-dark-mode .management-metrics span { color: #b2beb8; }
+html.billmitra-dark-mode .management-tabs { border-color: #41494a; }
+html.billmitra-dark-mode .management-shell button,
+html.billmitra-dark-mode .management-card,
+html.billmitra-dark-mode .management-metrics article { background: #242a2c; border-color: #485252; color: #f0f3f2; }
+html.billmitra-dark-mode .management-shell button[aria-pressed=true],
+html.billmitra-dark-mode .management-shell button[type=submit],
+html.billmitra-dark-mode .management-shell .management-open-orders button { background: #b33732; border-color: #d2524b; color: white; }
+html.billmitra-dark-mode .management-shell input:not([type=checkbox]),
+html.billmitra-dark-mode .management-shell select,
+html.billmitra-dark-mode .management-shell textarea { background: #171c1e; border-color: #505b5b; color: #f0f3f2; color-scheme: dark; }
+html.billmitra-dark-mode .management-shell td,
+html.billmitra-dark-mode .management-shell th { border-color: #3c4545; }
+html.billmitra-dark-mode .management-shell td small { color: #a9b5af; }
+html.billmitra-dark-mode .management-notice { color: #bfe8cb; background: #20362a; border-color: #3c684c; }
+html.billmitra-dark-mode .management-error,
+html.billmitra-dark-mode .management-open-orders { color: #ffd9d5; background: #3a2424; border-color: #86423d; }
+
+html.billmitra-dark-mode { color-scheme: dark; background: #171a1c; }
+html.billmitra-dark-mode body { background: #171a1c; color: #edf1ef; }
+html.billmitra-dark-mode .app-shell { background: #171a1c; color: #edf1ef; }
+html.billmitra-dark-mode .app-shell .main-panel,
+html.billmitra-dark-mode .app-shell .workspace,
+html.billmitra-dark-mode .app-shell .catalog-panel { background: #1b2022; color: #edf1ef; }
+html.billmitra-dark-mode .app-shell .topbar,
+html.billmitra-dark-mode .app-shell .order-panel,
+html.billmitra-dark-mode .app-shell .pos-action-bar { background: #242a2c; color: #edf1ef; border-color: #414b4b; }
+html.billmitra-dark-mode .app-shell .sidebar { background: #111516; }
+html.billmitra-dark-mode .app-shell .breadcrumb b,
+html.billmitra-dark-mode .app-shell .order-panel-heading h2,
+html.billmitra-dark-mode .app-shell .section-heading,
+html.billmitra-dark-mode .app-shell .delivery-slot-heading,
+html.billmitra-dark-mode .app-shell .table-card-top,
+html.billmitra-dark-mode .app-shell .bill-summary,
+html.billmitra-dark-mode .app-shell .cart-line,
+html.billmitra-dark-mode .app-shell .cart-item,
+html.billmitra-dark-mode .app-shell .selected-table-context-main b { color: #edf1ef; }
+html.billmitra-dark-mode .app-shell .table-card,
+html.billmitra-dark-mode .app-shell .delivery-slot-card.available,
+html.billmitra-dark-mode .app-shell .selected-table-context,
+html.billmitra-dark-mode .app-shell .selected-table-card,
+html.billmitra-dark-mode .app-shell .delivery-reference,
+html.billmitra-dark-mode .app-shell .delivery-customer-prompt,
+html.billmitra-dark-mode .app-shell .order-panel .cart-content,
+html.billmitra-dark-mode .app-shell .order-panel .cart-line,
+html.billmitra-dark-mode .app-shell .order-panel .cart-item,
+html.billmitra-dark-mode .app-shell .order-panel .discount-editor select,
+html.billmitra-dark-mode .app-shell .order-panel .right-action,
+html.billmitra-dark-mode .app-shell .pos-action-bar.order-entry-actions button:not(:disabled) { background: #252c2e; border-color: #465151; color: #edf1ef; }
+html.billmitra-dark-mode .app-shell .table-card.status-ordering,
+html.billmitra-dark-mode .app-shell .table-card.status-preparing,
+html.billmitra-dark-mode .app-shell .table-card.status-ready,
+html.billmitra-dark-mode .app-shell .table-card.status-payment_pending { background: #302a27; }
+html.billmitra-dark-mode .app-shell .table-card.selected { border-color: #d65b53; box-shadow: 0 0 0 2px #552c2a; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.occupied { background: #262d2f; border-color: #4b5754; color: #edf1ef; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.timer-open,
+html.billmitra-dark-mode .app-shell .delivery-slot-card.timer-overdue,
+html.billmitra-dark-mode .app-shell .delivery-slot-card.assignment-selected { color: #fff; }
+html.billmitra-dark-mode .app-shell .order-panel .bill-search-toolbar { background: #242a2c; }
+html.billmitra-dark-mode .app-shell .bill-item-search,
+html.billmitra-dark-mode .app-shell .search-box,
+html.billmitra-dark-mode .app-shell .order-panel input,
+html.billmitra-dark-mode .app-shell .order-panel textarea,
+html.billmitra-dark-mode .app-shell .order-panel select { background: #171c1e; border-color: #505b5b; color: #edf1ef; color-scheme: dark; }
+html.billmitra-dark-mode .app-shell .order-kitchen-message { background: #352526; border-color: #764541; color: #ffd8d4; }
+html.billmitra-dark-mode .app-shell .order-kitchen-message textarea { background: #171c1e; border-color: #764541; color: #edf1ef; }
+html.billmitra-dark-mode .app-shell .submit-order,
+html.billmitra-dark-mode .app-shell .record-payment-button { background: #b33732; color: #fff; }
+html.billmitra-dark-mode .app-shell .pos-action-bar.order-entry-actions { background: #242a2c; border-color: #414b4b; }
+html.billmitra-dark-mode .app-shell .pos-action-bar.order-entry-actions button:hover:not(:disabled) { background: #3a4243; }
+html.billmitra-dark-mode .app-shell .catalog-footer,
+html.billmitra-dark-mode .app-shell .status-footer { background: #1b2022; color: #b8c2bd; border-color: #414b4b; }
+html.billmitra-dark-mode .app-shell .table-order-menu,
+html.billmitra-dark-mode .app-shell .workspace.order-editor-open .catalog-panel,
+html.billmitra-dark-mode .app-shell .table-order-catalog .catalog-footer { background: #303332; }
+html.billmitra-dark-mode .app-shell .table-order-menu .bill-item-search { background: #242a2c; }
+html.billmitra-dark-mode .app-shell .order-panel .submit-order:disabled,
+html.billmitra-dark-mode .app-shell .order-panel .right-action:disabled { opacity: .55; }
+
+/* Keep service cards easy to read against the dark workspace. */
+html.billmitra-dark-mode .app-shell .delivery-slot-heading h1,
+html.billmitra-dark-mode .app-shell .page-heading h1,
+html.billmitra-dark-mode .app-shell .section-heading h2 { color: #f4f6f5; }
+html.billmitra-dark-mode .app-shell .delivery-slot-heading p,
+html.billmitra-dark-mode .app-shell .page-heading p { color: #b7c2bd; }
+html.billmitra-dark-mode .app-shell .delivery-card-search { background: #fff; border-color: #d6dfda; color: #596b62; }
+html.billmitra-dark-mode .app-shell .delivery-card-search input { background: #fff; color: #24332a; color-scheme: light; }
+html.billmitra-dark-mode .app-shell .delivery-card-search input::placeholder { color: #718078; }
+html.billmitra-dark-mode .app-shell .floor-summary { background: #fff; border-color: #d7dfda; color: #263b30; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.available,
+html.billmitra-dark-mode .app-shell .table-card.timer-available { background: #fff; border-color: #d7dfda; color: #263b30; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.available:hover,
+html.billmitra-dark-mode .app-shell .table-card.timer-available:hover { background: #fff5f4; border-color: #ce7971; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.available .delivery-slot-number { color: #87322e; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.available .delivery-slot-status { color: #5d6f65; }
+html.billmitra-dark-mode .app-shell .table-card.timer-available .table-name { color: #253b30; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.occupied.timer-open,
+html.billmitra-dark-mode .app-shell .table-card.timer-open { background: #1461a5; border-color: #0d518e; color: #fff; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.occupied.timer-overdue,
+html.billmitra-dark-mode .app-shell .table-card.timer-overdue { background: #b63832; border-color: #972923; color: #fff; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.occupied.assignment-selected { background: #218653; border-color: #176a47; color: #fff; }
+html.billmitra-dark-mode .app-shell .delivery-slot-card.timer-open .delivery-slot-number,
+html.billmitra-dark-mode .app-shell .delivery-slot-card.timer-overdue .delivery-slot-number,
+html.billmitra-dark-mode .app-shell .delivery-slot-card.assignment-selected .delivery-slot-number,
+html.billmitra-dark-mode .app-shell .table-card.timer-open .table-name,
+html.billmitra-dark-mode .app-shell .table-card.timer-overdue .table-name { color: #fff; }
 @media(max-width: 850px) { .management-columns { grid-template-columns: 1fr; } .management-metrics { grid-template-columns: repeat(2,1fr); } .management-shell { padding: 16px; } }

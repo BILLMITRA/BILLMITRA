@@ -12,7 +12,7 @@ export interface PrintDocument {
   ticketId: string | null; ticketCreatedAt: string | null; copy: boolean
 }
 export interface ClaimedPrintJob extends PrintJobSummary { claimToken: string; document: PrintDocument }
-export interface PrinterSettings { bill: string; kot: string; restaurant: string; branch: string }
+export interface PrinterSettings { bill: string; kot: string; restaurant: string; branch: string; paperWidth?: 'default' | '58mm' | '80mm' }
 export interface PrinterState {
   settings: PrinterSettings; printers: { name: string; displayName: string }[]; error: string
   jobs: PrintJobSummary[]

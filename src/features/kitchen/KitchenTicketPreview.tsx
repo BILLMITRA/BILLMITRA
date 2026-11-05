@@ -34,6 +34,7 @@ export function KitchenTicketPreview({ order, tableLabel, duplicate, onClose }: 
             {order.type === 'delivery' && order.deliveryInstructions && <p>Delivery instructions: {order.deliveryInstructions}</p>}
             {order.type === 'delivery' && order.scheduledDeliveryAt && <p>Promised delivery: {new Date(order.scheduledDeliveryAt).toLocaleString('en-IN')}</p>}
             {order.type === 'delivery' && order.assignedDeliveryTo && <p>Delivery assigned to: {order.assignedDeliveryTo}</p>}
+            {order.kitchenMessage && <p><b>Kitchen message: {order.kitchenMessage}</b></p>}
           </header>
           <ul>
             {order.items.map((item) => (

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
+import { request as httpRequest } from 'node:http'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,6 +16,8 @@ let backend: ReturnType<typeof createPosBackend>
 let server: ReturnType<typeof createWebServer>
 let origin: string
 let cookie = ''
+let beforeOrderWrite: (() => Promise<void>) | undefined
+let afterOrderWrite: (() => Promise<void>) | undefined
 const owner = { username: 'restaurant-owner', displayName: 'Owner', password: 'test-owner-password-123' }
 
 async function call<T = unknown>(method: string, input?: unknown, useCookie = cookie) {
@@ -32,7 +35,12 @@ beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'billmitra-web-test-'))
   writeFileSync(join(directory, 'index.html'), '<html>Restaurant</html>')
   backend = createPosBackend(join(directory, 'test.sqlite'))
-  server = createWebServer({ backend, assetsDirectory: directory })
+  beforeOrderWrite = undefined
+  afterOrderWrite = undefined
+  server = createWebServer({ backend, assetsDirectory: directory,
+    beforeOrderWrite: async () => { await beforeOrderWrite?.() },
+    afterOrderWrite: async () => { await afterOrderWrite?.() },
+  })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const address = server.address()
@@ -49,6 +57,158 @@ afterEach(async () => {
 })
 
 describe('restaurant browser backend', () => {
+  it('checks the manager PIN before allowing the Management screen to open', async () => {
+    await call('setupOwner', owner)
+    expect((await call('authorizeManagement', '1234')).response.status).toBe(400)
+    expect((await call('setManagerPin', '1234')).response.status).toBe(200)
+    const incorrect = await call('authorizeManagement', '0000')
+    expect(incorrect.response.status).toBe(400)
+    expect(incorrect.error).toContain('Incorrect manager PIN')
+    expect((await call('authorizeManagement', '1234')).response.status).toBe(200)
+    expect((await call('resetManagerPin', { ownerPassword: owner.password, pin: '5678' })).response.status).toBe(200)
+    expect((await call('authorizeManagement', '1234')).response.status).toBe(400)
+    expect((await call('authorizeManagement', '5678')).response.status).toBe(200)
+  })
+  it('separates Dining and Kitchen phone workspaces and delivers kitchen notices', async () => {
+    await call('setupOwner', owner)
+    await call('createStaff', { username: 'dining-phone', displayName: 'Dining', role: 'waiter', password: 'dining-test-123' })
+    await call('createStaff', { username: 'kitchen-phone', displayName: 'Kitchen', role: 'kitchen', password: 'kitchen-test-123' })
+    const mobile = (action: string, input: unknown, token = '') => fetch(`${origin}/api/mobile/${action}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ input }),
+    })
+    const signIn = async (username: string, password: string, workspace: string) => {
+      const response = await mobile('login', { branchId: 'main', username, password, workspace })
+      return { response, data: await response.json() as { result: { token: string } } }
+    }
+    expect((await signIn('kitchen-phone', 'kitchen-test-123', 'dining')).response.status).toBe(403)
+    expect((await signIn('dining-phone', 'dining-test-123', 'kitchen')).response.status).toBe(403)
+    const dining = (await signIn('dining-phone', 'dining-test-123', 'dining')).data.result.token
+    const kitchen = (await signIn('kitchen-phone', 'kitchen-test-123', 'kitchen')).data.result.token
+    expect((await mobile('queue', null, dining)).status).toBe(404)
+    expect((await mobile('order', {}, kitchen)).status).toBe(404)
+    const menu = ((await (await mobile('menu', null, dining)).json()) as { result: MenuData }).result
+    const saved = ((await (await mobile('order', {
+      requestId: randomUUID(), type: 'dine_in', tableId: menu.tables[0].id,
+      customerName: '', deliveryAddress: '', discount: null,
+      items: [{ productId: menu.products[0].id, quantity: 1, note: '' }],
+    }, dining)).json()) as { result: SavedOrder }).result
+    const queue = ((await (await mobile('queue', null, kitchen)).json()) as {
+      result: { orders: { id: string; ticketId: string; tableName: string; status: string }[] }
+    }).result
+    const ticket = queue.orders.find(item => item.id === saved.id)!
+    expect(ticket.tableName).toBe(menu.tables[0].name)
+    expect((await mobile('delay', { requestId: randomUUID(), orderId: saved.id, delayMinutes: 10,
+      reason: 'Heavy kitchen rush' }, kitchen)).status).toBe(200)
+    const notices = ((await (await mobile('menu', null, dining)).json()) as {
+      result: { notices: { id: string; orderId: string; delayMinutes: number; tableName: string }[] }
+    }).result.notices
+    expect(notices[0]).toMatchObject({ orderId: saved.id, delayMinutes: 10, tableName: ticket.tableName })
+    expect((await mobile('ack-notice', notices[0].id, dining)).status).toBe(200)
+    const afterAck = ((await (await mobile('menu', null, dining)).json()) as { result: { notices: { id: string }[] } }).result.notices
+    expect(afterAck.some(item => item.id === notices[0].id)).toBe(false)
+    const availability = { requestId: randomUUID(), productId: menu.products[0].id, available: false }
+    expect((await mobile('availability', availability, kitchen)).status).toBe(200)
+    expect((await mobile('availability', availability, kitchen)).status).toBe(200)
+    const updatedMenu = ((await (await mobile('menu', null, dining)).json()) as { result: MenuData & { notices: { kind: string }[] } }).result
+    expect(updatedMenu.products.find(product => product.id === availability.productId)?.available).toBe(false)
+    expect(updatedMenu.notices.some(item => item.kind === 'availability')).toBe(true)
+    expect((await mobile('status', { orderId: saved.id, ticketId: ticket.ticketId, status: 'preparing' }, kitchen)).status).toBe(200)
+    expect((await mobile('status', { orderId: saved.id, ticketId: ticket.ticketId, status: 'ready' }, kitchen)).status).toBe(200)
+  })
+  it('delivers voice and text between authenticated Dining and Kitchen staff', async () => {
+    await call('setupOwner', owner)
+    await call('createStaff', { username: 'voice-waiter', displayName: 'Voice Waiter', role: 'waiter', password: 'voice-waiter-pass' })
+    await call('createStaff', { username: 'voice-kitchen', displayName: 'Voice Kitchen', role: 'kitchen', password: 'voice-kitchen-pass' })
+    const mobile = (action: string, input: unknown, token = '') => fetch(`${origin}/api/mobile/${action}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ input }),
+    })
+    const signIn = async (username: string, password: string, workspace: string) => {
+      const response = await mobile('login', { branchId: 'main', username, password, workspace })
+      return ((await response.json()) as { result: { token: string } }).result.token
+    }
+    const waiter = await signIn('voice-waiter', 'voice-waiter-pass', 'dining')
+    const kitchen = await signIn('voice-kitchen', 'voice-kitchen-pass', 'kitchen')
+    const input = { requestId: randomUUID(), mime: 'audio/3gpp', audio: Buffer.from('short audio').toString('base64') }
+    const sent = await mobile('voice-send', input, kitchen)
+    expect(sent.status).toBe(200)
+    const id = ((await sent.json()) as { result: { id: string } }).result.id
+    const repeated = await mobile('voice-send', input, kitchen)
+    expect(((await repeated.json()) as { result: { id: string } }).result.id).toBe(id)
+    const incoming = ((await (await mobile('voice-list', null, waiter)).json()) as { result: { id: string; senderName: string }[] }).result
+    expect(incoming).toMatchObject([{ id, senderName: 'Voice Kitchen' }])
+    expect(((await (await mobile('voice-list', null, kitchen)).json()) as { result: unknown[] }).result).toHaveLength(0)
+    const play = (token: string) => fetch(`${origin}/api/mobile/voice/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+    expect(await (await play(waiter)).text()).toBe('short audio')
+    expect(await (await play(kitchen)).text()).toBe('short audio')
+    expect((await play('')).status).toBe(401)
+    expect((await mobile('voice-send', { ...input, requestId: randomUUID(), audio: 'bad*' }, kitchen)).status).toBe(400)
+    const textInput = { requestId: randomUUID(), text: 'Table 01 needs five more minutes' }
+    const textSent = await mobile('message-send', textInput, kitchen)
+    expect(textSent.status).toBe(200)
+    const textId = ((await textSent.json()) as { result: { id: string } }).result.id
+    const repeatedText = await mobile('message-send', textInput, kitchen)
+    expect(((await repeatedText.json()) as { result: { id: string } }).result.id).toBe(textId)
+    const waiterFeed = ((await (await mobile('message-list', null, waiter)).json()) as { result: { id: string; kind: string; text: string | null }[] }).result
+    expect(waiterFeed).toContainEqual(expect.objectContaining({ id: textId, kind: 'text', text: textInput.text }))
+    expect(waiterFeed).toContainEqual(expect.objectContaining({ id, kind: 'voice' }))
+    const kitchenFeed = ((await (await mobile('message-list', null, kitchen)).json()) as { result: { id: string }[] }).result
+    expect(kitchenFeed.some(message => message.id === textId)).toBe(true)
+    expect((await mobile('message-send', { requestId: randomUUID(), text: '   ' }, kitchen)).status).toBe(400)
+    expect((await mobile('message-list', null, '')).status).toBe(401)
+  })
+  it('accepts only the configured HTTPS hostname behind a local tunnel', async () => {
+    const publicServer = createWebServer({ backend, assetsDirectory: directory, origin: 'https://owner.example.test', ownerOnly: true })
+    try {
+      publicServer.listen(0, '127.0.0.1')
+      await once(publicServer, 'listening')
+      const address = publicServer.address()
+      if (!address || typeof address === 'string') throw new Error('Missing test address.')
+      const local = `http://127.0.0.1:${address.port}`
+      expect((await fetch(`${local}/api/health`)).status).toBe(403)
+      const publicStatus = (path: string) => new Promise<number>((resolve, reject) => {
+        const request = httpRequest(`${local}${path}`, { headers: { Host: 'owner.example.test' } }, response => {
+          response.resume()
+          response.on('end', () => resolve(response.statusCode ?? 0))
+        })
+        request.on('error', reject)
+        request.end()
+      })
+      expect(await publicStatus('/api/health')).toBe(200)
+      expect(await publicStatus('/api/branches')).toBe(404)
+      expect(await publicStatus('/')).toBe(404)
+    } finally {
+      await new Promise<void>((resolve, reject) => publicServer.close(error => error ? reject(error) : resolve()))
+    }
+  })
+
+  it('requires MySQL before accepting a waiter order and safely retries after a sync failure', async () => {
+    await call('setupOwner', owner)
+    await call('createStaff', { username: 'mysql-waiter', displayName: 'Waiter', role: 'waiter', password: 'test-waiter-password-123' })
+    const signed = await fetch(`${origin}/api/mobile/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: { branchId: 'main', username: 'mysql-waiter', password: 'test-waiter-password-123' } }) })
+    const token = ((await signed.json()) as { result: { token: string } }).result.token
+    const menu = (await call<MenuData>('loadMenu')).result
+    const input = { requestId: randomUUID(), type: 'dine_in', tableId: menu.tables[0].id,
+      customerName: '', deliveryAddress: '', discount: null,
+      items: [{ productId: menu.products[0].id, quantity: 1, note: '' }] }
+    const order = () => fetch(`${origin}/api/mobile/order`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ input }) })
+    beforeOrderWrite = async () => { throw new Error('synthetic connection failure') }
+    expect((await order()).status).toBe(503)
+    expect((await call<MenuData>('loadMenu')).result.activeOrders).toHaveLength(0)
+    beforeOrderWrite = undefined
+    afterOrderWrite = async () => { throw new Error('synthetic sync failure') }
+    expect((await order()).status).toBe(503)
+    const saved = (await call<MenuData>('loadMenu')).result.activeOrders
+    expect(saved).toHaveLength(1)
+    afterOrderWrite = undefined
+    const retried = await order()
+    expect(retried.status).toBe(200)
+    expect(((await retried.json()) as { result: SavedOrder }).result.id).toBe(saved[0].id)
+    expect((await call<MenuData>('loadMenu')).result.activeOrders).toHaveLength(1)
+  })
   it('runs the native login client against the real backend for success, invalid credentials and database errors', async () => {
     await call('setupOwner', owner)
     const actualFetch = globalThis.fetch

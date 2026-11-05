@@ -22,13 +22,15 @@ import type {
   DeliveryScheduleEntry,
   DeliveryScheduleInput,
   SavedDeliveryCustomerDetails,
+  DeliveryCustomerRecord,
+  SaveDeliveryCustomerInput,
   SplitOrderInput,
   SplitOrderResult,
   JoinOrdersInput,
 } from '../../shared/domain'
-import type { CategoryInput, ProductInput, MenuCatalog, SalesReportInput, SalesReport } from '../../shared/restaurant'
+import type { CategoryInput, ProductInput, TableInput, CardSettings, MenuCatalog, SalesReportInput, SalesReport } from '../../shared/restaurant'
 import type { Category, Product } from '../../shared/domain'
-import type { InventoryItem, InventoryItemInput, StockMovementInput, StockMovement, KitchenQueue, KitchenStatusInput, CashSummary, CashClose, CashCloseInput } from '../../shared/restaurant'
+import type { InventoryItem, InventoryItemInput, StockMovementInput, StockMovement, KitchenQueue, KitchenStatusInput, CashSummary, CashClose, CashCloseInput, CashOpenInput, CashOpening } from '../../shared/restaurant'
 import type { PaymentLedger, TenderInput, RefundInput } from '../../shared/restaurant'
 import type { BackupInfo } from '../../shared/restaurant'
 
@@ -47,12 +49,15 @@ declare global {
       moveStock: (input: StockMovementInput) => Promise<InventoryItem>
       getStockHistory: (itemId: string) => Promise<StockMovement[]>
       getCashSummary: () => Promise<CashSummary>
+      openCash: (input: CashOpenInput) => Promise<CashOpening>
       closeCash: (input: CashCloseInput) => Promise<CashClose>
       getKitchenQueue: () => Promise<KitchenQueue>
       updateKitchenStatus: (input: KitchenStatusInput) => Promise<void>
       getMenuCatalog: () => Promise<MenuCatalog>
       saveCategory: (input: CategoryInput) => Promise<Category>
       saveProduct: (input: ProductInput) => Promise<Product>
+      addTable: (input: TableInput) => Promise<TableInput & { id: string }>
+      saveCardSettings: (input: CardSettings) => Promise<CardSettings>
       getSalesReport: (input: SalesReportInput) => Promise<SalesReport>
       getStaffAccessState: () => Promise<StaffAccessState>
       setupOwner: (input: OwnerSetupInput) => Promise<StaffIdentity>
@@ -60,6 +65,7 @@ declare global {
       logoutStaff: () => Promise<void>
       listStaff: () => Promise<StaffIdentity[]>
       createStaff: (input: CreateStaffInput) => Promise<StaffIdentity>
+      resetManagerPassword: (input: { staffId: string; password: string }) => Promise<void>
       loadMenu: () => Promise<MenuData>
       createOrder: (input: CreateOrderInput) => Promise<SavedOrder>
       getOrder: (orderId: string) => Promise<SavedOrder | null>
@@ -67,6 +73,8 @@ declare global {
       recordPayment: (input: RecordPaymentInput) => Promise<PaymentRecord>
       managerPinConfigured: () => Promise<boolean>
       setManagerPin: (pin: string) => Promise<void>
+      authorizeManagement: (pin: string) => Promise<void>
+      resetManagerPin: (input: { ownerPassword: string; pin: string }) => Promise<void>
       voidOrder: (input: { orderId: string; pin: string; reason: string }) => Promise<SavedOrder>
       voidOrderItem: (input: { orderId: string; itemId: string; quantity: number; pin: string; reason: string }) => Promise<SavedOrder>
       splitOrder: (input: SplitOrderInput) => Promise<SplitOrderResult>
@@ -74,6 +82,8 @@ declare global {
       recordDuplicateKotRequest: (orderId: string) => Promise<void>
       listDeliverySchedule: () => Promise<DeliveryScheduleEntry[]>
       findSavedDeliveryCustomer: (contactNumber: string) => Promise<SavedDeliveryCustomerDetails | null>
+      listDeliveryCustomers: (query: string) => Promise<DeliveryCustomerRecord[]>
+      saveDeliveryCustomer: (input: SaveDeliveryCustomerInput) => Promise<DeliveryCustomerRecord>
       listDeliveryRiders: () => Promise<DeliveryRider[]>
       saveDeliveryRider: (input: DeliveryRiderInput) => Promise<DeliveryRider>
       updateDeliverySchedule: (input: DeliveryScheduleInput) => Promise<void>
@@ -86,6 +96,7 @@ declare global {
       getRiderRunState: (riderId: string) => Promise<RiderRunState>
       issueDeliveryFloat: (input: { requestId: string; riderId: string; amountPaise: number; notes: string }) => Promise<DeliveryFloatIssue>
       closeDeliveryRun: (input: { requestId: string; riderId: string; receivedPaise: number; notes: string }) => Promise<DeliveryRunSettlement>
+      cashOutDelivery: (input: { requestId: string; orderId: string; pin: string; expectedBalancePaise: number }) => Promise<{ order: SavedOrder; collectedPaise: number }>
     }
   }
 }

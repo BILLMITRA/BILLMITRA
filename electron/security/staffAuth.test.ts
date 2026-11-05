@@ -102,6 +102,19 @@ describe('local staff authentication service', () => {
       .toThrow('This account is temporarily locked. Try again in five minutes.')
   })
 
+  it('lets only the owner reset a manager password and revokes the manager session', () => {
+    auth.setupOwner(1, { username: 'owner', displayName: 'Owner', password: 'owner-password' })
+    const manager = auth.createStaff(1, { username: 'manager1', displayName: 'Manager', role: 'manager', password: 'old-password' })
+    auth.login(2, { username: 'manager1', password: 'old-password' })
+    expect(() => auth.resetManagerPassword(2, { staffId: manager.id, password: 'new-password' })).toThrow()
+    expect(() => auth.resetManagerPassword(1, { staffId: manager.id, password: '123' })).toThrow()
+    auth.resetManagerPassword(1, { staffId: manager.id, password: 'new-password' })
+    expect(() => auth.requirePermission(2, 'pos:access')).toThrow('Sign in')
+    expect(() => auth.login(2, { username: 'manager1', password: 'old-password' })).toThrow('Invalid username or password.')
+    expect(auth.login(2, { username: 'manager1', password: 'new-password' }).id).toBe(manager.id)
+    expect((database.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'staff.password_reset'").get() as { count: number }).count).toBe(1)
+  })
+
   it('does not permit owner setup after an account already exists and clears sessions on logout', () => {
     auth.setupOwner(1, {
       username: 'owner',

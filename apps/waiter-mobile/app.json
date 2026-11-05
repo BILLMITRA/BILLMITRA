@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "BillMitra Waiter",
+    "name": "BillMitra Staff",
     "slug": "billmitra-waiter",
-    "version": "1.0.4",
+    "version": "1.1.9",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -11,8 +11,10 @@
       "bundleIdentifier": "com.billmitra.waiter"
     },
     "android": {
-      "versionCode": 5,
+      "versionCode": 16,
       "package": "com.billmitra.waiter",
+      "googleServicesFile": "./google-services.json",
+      "permissions": ["android.permission.VIBRATE", "android.permission.POST_NOTIFICATIONS"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -21,6 +23,22 @@
       },
       "predictiveBackGestureEnabled": false
     },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow BillMitra Staff to record short voice messages."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "staff-alerts",
+          "sounds": ["./assets/waiting_chime.wav"]
+        }
+      ],
+      "expo-asset"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     },

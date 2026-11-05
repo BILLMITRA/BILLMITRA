@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="302" height="305" viewBox="0 0 302 305"><defs>
+ <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FF2733"/><stop offset="0.55" stop-color="#E00018"/><stop offset="1" stop-color="#85000C"/></linearGradient>
+ <linearGradient id="deep" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#C90016"/><stop offset="1" stop-color="#650009"/></linearGradient>
+ <linearGradient id="teal" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#CB0018"/><stop offset="1" stop-color="#FF2635"/></linearGradient>
+ <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#F3F8FD"/></linearGradient>
+ </defs>
+<!-- B shaped brand mark -->
+<path d="M28 45 Q28 18 57 18 H187 C260 18 273 115 209 141 C287 157 276 285 186 285 H54 Q28 285 28 256 Z" fill="url(#blue)"/>
+<path d="M28 45 Q29 18 56 18 Q74 18 92 49 Q111 79 147 79 H214 Q194 127 137 135 H68 L59 275 Q28 267 28 245Z" fill="url(#deep)" opacity=".75"/>
+<path d="M28 203 L28 257 Q28 281 54 285 H112 Q67 275 59 247Z" fill="url(#teal)"/>
+<!-- receipt -->
+<path d="M67 79 Q67 62 85 62 H177 Q197 62 197 83 V247 L183 261 L170 249 L157 261 L143 249 L129 261 L115 249 L101 261 L87 249 L74 261 Q67 261 67 249 Z" fill="url(#paper)"/>
+<rect x="90" y="95" width="85" height="11" rx="5.5" fill="#F20C25"/>
+<rect x="90" y="126" width="85" height="11" rx="5.5" fill="#B8C5D3"/>
+<rect x="90" y="157" width="50" height="11" rx="5.5" fill="#B8C5D3"/>
+<rect x="90" y="188" width="35" height="11" rx="5.5" fill="#B8C5D3"/>
+<circle cx="172" cy="205" r="37" fill="url(#teal)" stroke="white" stroke-width="5"/>
+<text x="172" y="222" font-size="45" font-weight="bold" font-family="DejaVu Sans, sans-serif" text-anchor="middle" fill="white">₹</text>
+</svg>

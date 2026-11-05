@@ -4,7 +4,7 @@ import { formatOrderReference } from '../../../shared/domain'
 import { formatMoney } from '../../../shared/billing'
 import { DesktopPrinters } from '../printing/DesktopPrinters'
 import '../printing/printing.css'
-import { closeCash, getCashSummary, getKitchenQueue, getStockHistory, listInventory, moveStock, saveInventoryItem, updateKitchenStatus } from '../../services/pos'
+import { closeCash, getCashSummary, getKitchenQueue, getStockHistory, listInventory, loadMenu, moveStock, saveInventoryItem, updateKitchenStatus } from '../../services/pos'
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'The operation failed.'
 function useRequestId() {
@@ -49,24 +49,41 @@ export function InventoryPanel() {
   </>
 }
 
-export function CashClosingPanel() {
+export function CashClosingPanel({ onReturnToCashier }: { onReturnToCashier: () => void }) {
   const [summary, setSummary] = useState<CashSummary | null>(null)
-  const [opening, setOpening] = useState('0.00')
+  const [activeOrders, setActiveOrders] = useState<string[] | null>(null)
   const [counted, setCounted] = useState('0.00')
   const [notes, setNotes] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const request = useRequestId()
-  useEffect(() => { let active = true; getCashSummary().then(value => { if (active) setSummary(value) }).catch(cause => { if (active) setError(message(cause)) }); return () => { active = false } }, [])
+  useEffect(() => {
+    let active = true
+    getCashSummary().then(value => { if (active) setSummary(value) }).catch(cause => { if (active) setError(message(cause)) })
+    loadMenu().then(menu => {
+      if (!active) return
+      const tableNames = new Map(menu.tables.map(table => [table.id, table.name]))
+      setActiveOrders(menu.activeOrders.map(order => `${order.type === 'dine_in' ? tableNames.get(order.tableId ?? '') ?? 'Table' : order.type === 'parcel' ? 'Parcel' : 'Delivery'} ${formatOrderReference(order)}`))
+    }).catch(cause => { if (active) setError(message(cause)) })
+    return () => { active = false }
+  }, [])
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('')
-    if (![opening, counted].every(value => /^\d+(\.\d{1,2})?$/.test(value))) { setError('Use non-negative amounts with up to two decimal places.'); return }
+    if (!/^\d+(\.\d{1,2})?$/.test(counted)) { setError('Use a non-negative amount with up to two decimal places.'); return }
+    if (activeOrders?.length && !window.confirm(`${activeOrders.length} orders are still running. Recording the cash drawer count will not pay or clear those cards. Continue with cash closing?`)) return
     setBusy(true)
-    const data = { openingPaise: Math.round(Number(opening) * 100), countedPaise: Math.round(Number(counted) * 100), notes }
-    try { await closeCash({ ...data, requestId: request.get(JSON.stringify(data)) }); setSummary(await getCashSummary()); request.clear(); setNotes(''); setOpening('0.00'); setCounted('0.00') } catch (cause) { setError(message(cause)) } finally { setBusy(false) }
+    const data = { countedPaise: Math.round(Number(counted) * 100), notes }
+    try { await closeCash({ ...data, requestId: request.get(JSON.stringify(data)) }); setSummary(await getCashSummary()); request.clear(); setNotes(''); setCounted('0.00') } catch (cause) { setError(message(cause)) } finally { setBusy(false) }
   }
-  return <><p>Close cash receipts since the previous closing. Enter the opening cash held in the drawer and the amount counted. Cash expenses and bank withdrawals are not tracked here.</p>{error && <p className="management-error" role="alert">{error}</p>}
-    <div className="management-columns"><form className="management-card" onSubmit={event => void submit(event)}><h2>Close cash drawer</h2>{summary && <p>Cash receipts since last close: <b>{formatMoney(summary.receiptsPaise)}</b></p>}<fieldset disabled={busy || !summary}><label>Opening cash (INR)<input required inputMode="decimal" value={opening} onChange={event => setOpening(event.target.value)} /></label><p>Expected cash: {formatMoney(Math.round(Number(opening || 0) * 100) + (summary?.receiptsPaise ?? 0))}</p><label>Counted cash (INR)<input required inputMode="decimal" value={counted} onChange={event => setCounted(event.target.value)} /></label><label>Notes / reason for variance<textarea maxLength={250} value={notes} onChange={event => setNotes(event.target.value)} /></label><button type="submit">Record cash closing</button></fieldset></form>
+  return <><p>Cash closing uses the opening amount saved when the drawer was opened. It does not pay or complete open orders. After a closing, the receipt total starts again at zero.</p>
+    {activeOrders !== null && activeOrders.length > 0 && <div className="management-open-orders" role="status">
+      <strong>{activeOrders.length} active {activeOrders.length === 1 ? 'order is' : 'orders are'} still running</strong>
+      <span>{activeOrders.slice(0, 6).join(' · ')}{activeOrders.length > 6 ? ` · and ${activeOrders.length - 6} more` : ''}</span>
+      <span>Return to the cashier to collect payment and close each bill, or void a canceled bill. Settle assigned delivery runs in Delivery schedule.</span>
+      <button type="button" onClick={onReturnToCashier}>Return to cashier</button>
+    </div>}
+    {error && <p className="management-error" role="alert">{error}</p>}
+    <div className="management-columns"><form className="management-card" onSubmit={event => void submit(event)}><h2>Close cash drawer</h2>{summary && <p>Cash receipts since last close: <b>{formatMoney(summary.receiptsPaise)}</b></p>}{summary && !summary.currentOpening && <p>No drawer is open. Return to the cashier to enter the opening cash amount. <button type="button" onClick={onReturnToCashier}>Open cash drawer</button></p>}<fieldset disabled={busy || !summary?.currentOpening || activeOrders === null}><p>Opening cash saved: <b>{formatMoney(summary?.currentOpening?.openingPaise ?? 0)}</b></p><p>Expected cash: <b>{formatMoney((summary?.currentOpening?.openingPaise ?? 0) + (summary?.receiptsPaise ?? 0))}</b></p><label>Counted cash (INR)<input required inputMode="decimal" value={counted} onChange={event => setCounted(event.target.value)} /></label><label>Notes / reason for variance<textarea maxLength={250} value={notes} onChange={event => setNotes(event.target.value)} /></label><button type="submit">Record cash closing</button></fieldset></form>
     <section className="management-card"><h2>Last closing</h2>{summary?.lastClose ? <dl>{Object.entries({ Date: summary.lastClose.createdAt + ' UTC', Staff: summary.lastClose.actor, Expected: formatMoney(summary.lastClose.expectedPaise), Counted: formatMoney(summary.lastClose.countedPaise), Variance: formatMoney(summary.lastClose.variancePaise), Notes: summary.lastClose.notes }).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl> : <p>No previous closing recorded.</p>}</section></div>
   </>
 }

@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "BillMitra Owner", "slug": "billmitra-owner", "owner": "billmitra", "version": "0.1.0",
+    "orientation": "portrait", "userInterfaceStyle": "light", "icon": "./assets/billmitra-symbol.png",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.billmitra.owner" },
+    "android": { "package": "com.billmitra.owner", "versionCode": 2, "predictiveBackGestureEnabled": false },
+    "extra": { "eas": { "projectId": "b52d48b0-ff47-4ed7-8c8a-dfc8d5091cbb" } }
+  }
+}

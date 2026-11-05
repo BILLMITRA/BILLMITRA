@@ -11,8 +11,8 @@ describe('staff authentication security', () => {
   })
 
   it('rejects passwords outside the accepted length', () => {
-    expect(() => createPasswordHash('short')).toThrow(/12 to 128 characters/)
-    expect(() => createPasswordHash('x'.repeat(129))).toThrow(/12 to 128 characters/)
+    expect(() => createPasswordHash('pin')).toThrow(/4 to 128 characters/)
+    expect(() => createPasswordHash('x'.repeat(129))).toThrow(/4 to 128 characters/)
   })
 
   it('applies explicit role permissions without granting POS access to operational roles', () => {

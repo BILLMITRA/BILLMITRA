@@ -1,9 +1,14 @@
 import { afterEach, test, mock } from 'node:test'
 import assert from 'node:assert/strict'
-import { ApiError, getMenu, login, requestPrint, serverUrl } from '../src/api.ts'
+import { ApiError, getMenu, login, requestPrint, RESTAURANT_SERVER, serverUrl } from '../src/api.ts'
+
+test('staff app uses the permanent HTTPS server', () => {
+  assert.equal(RESTAURANT_SERVER, 'https://mobile.billmitra.shop')
+  assert.equal(serverUrl(RESTAURANT_SERVER), RESTAURANT_SERVER)
+})
 
 const server = 'https://restaurant.example'
-const session = { token: 'f'.repeat(64), staff: { id: 'staff-test', displayName: 'Test', username: 'waiter', role: 'waiter' }, branch: { id: 'main', name: 'Test branch' }, server }
+const session = { token: 'f'.repeat(64), staff: { id: 'staff-test', displayName: 'Test', username: 'waiter', role: 'waiter' }, branch: { id: 'main', name: 'Test branch' }, server, workspace: 'dining' }
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } })
 const signIn = () => login(server, 'main', 'waiter', 'synthetic-test-password')
 afterEach(() => { mock.restoreAll(); mock.timers.reset() })
@@ -20,7 +25,8 @@ test('login posts to the restaurant endpoint and validates its successful sessio
   assert.deepEqual(await signIn(), session)
 })
 test('existing servers with the result envelope remain compatible', async () => {
-  mock.method(globalThis, 'fetch', async () => json({ result: session }))
+  const { workspace: _workspace, ...legacySession } = session
+  mock.method(globalThis, 'fetch', async () => json({ result: legacySession }))
   assert.deepEqual(await signIn(), session)
 })
 test('invalid credentials and account throttling preserve meaningful HTTP errors', async () => {

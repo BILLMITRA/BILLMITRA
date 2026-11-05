@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "eas-cli": "^27.3.0"
+  },
+  "_npx": {
+    "packages": [
+      "eas-cli"
+    ]
+  }
+}

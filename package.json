@@ -10,6 +10,8 @@
     "dev": "npm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && electron .\"",
     "build": "tsc -b && vite build && npm run build:electron",
     "build:electron": "node -e \"require('node:fs').rmSync('electron-dist', { recursive: true, force: true })\" && tsc -p electron/tsconfig.json",
+    "mysql:check": "npm run build:electron && node database/mysql/check.cjs",
+    "mysql:preflight": "npm run build:electron && node database/mysql/import-branch.cjs",
     "test": "vitest run",
     "lint": "oxlint",
     "preview": "vite preview",
@@ -20,6 +22,7 @@
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
+    "mysql2": "^3.15.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "zod": "^4.1.12"
@@ -47,10 +50,12 @@
     "files": [
       "dist/**/*",
       "electron-dist/**/*",
+      "database/mysql/import-branch.cjs",
       "package.json"
     ],
     "asar": true,
     "win": {
+      "icon": "src/assets/billmitra-red-symbol.ico",
       "target": "nsis"
     },
     "nsis": {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
 import type { Category, Product, StaffIdentity } from '../../shared/domain.js'
-import type { MenuCatalog, SalesReport, InventoryItem, StockMovement, CashSummary, CashClose } from '../../shared/restaurant.js'
+import type { MenuCatalog, SalesReport, InventoryItem, StockMovement, CashSummary, CashClose, CashOpening } from '../../shared/restaurant.js'
 
 const id = z.string().trim().min(1).max(80)
 const categorySchema = z.object({ id: id.optional(), name: z.string().trim().min(1).max(80), sortOrder: z.number().int().min(0).max(9999) })
@@ -86,38 +86,69 @@ export class RestaurantManagementService {
   }
 
   cashSummary(): CashSummary {
-    const last = this.db.prepare('SELECT payment_cutoff, refund_cutoff, movement_cutoff FROM cash_closes ORDER BY rowid DESC LIMIT 1').get() as { payment_cutoff: number; refund_cutoff: number; movement_cutoff: number } | undefined
+    const last = this.db.prepare('SELECT id, payment_cutoff, refund_cutoff, movement_cutoff FROM cash_closes ORDER BY rowid DESC LIMIT 1').get() as { id: string; payment_cutoff: number; refund_cutoff: number; movement_cutoff: number } | undefined
     const receipts = this.db.prepare("SELECT COALESCE(SUM(amount_paise),0) AS amount FROM payment_tenders WHERE rowid > ? AND method = 'cash'").get(last?.payment_cutoff ?? 0) as { amount: number }
     const refunds = this.db.prepare(`SELECT COALESCE(SUM(r.amount_paise),0) AS amount FROM payment_refunds r
       JOIN payment_tenders t ON t.id = r.tender_id WHERE r.rowid > ? AND t.method = 'cash'`).get(last?.refund_cutoff ?? 0) as { amount: number }
     const movements = this.db.prepare('SELECT COALESCE(SUM(amount_paise),0) AS amount FROM delivery_cash_movements WHERE rowid > ?').get(last?.movement_cutoff ?? 0) as { amount: number }
-    return { receiptsPaise: receipts.amount - refunds.amount + movements.amount, lastClose: this.db.prepare(`SELECT id, opening_paise AS openingPaise,
+    const latestOpening = this.db.prepare(`SELECT id, after_close_id AS afterCloseId, opening_paise AS openingPaise,
+      actor, created_at AS createdAt FROM cash_openings ORDER BY rowid DESC LIMIT 1`).get() as
+      (CashOpening & { afterCloseId: string | null }) | undefined
+    const currentOpening = latestOpening && latestOpening.afterCloseId === (last?.id ?? null)
+      ? { id: latestOpening.id, openingPaise: latestOpening.openingPaise, actor: latestOpening.actor, createdAt: latestOpening.createdAt }
+      : null
+    return { receiptsPaise: receipts.amount - refunds.amount + movements.amount, currentOpening, lastClose: this.db.prepare(`SELECT id, opening_paise AS openingPaise,
       receipts_paise AS receiptsPaise, expected_paise AS expectedPaise, counted_paise AS countedPaise,
       variance_paise AS variancePaise, notes, actor, created_at AS createdAt FROM cash_closes ORDER BY rowid DESC LIMIT 1`).get() as unknown as CashClose | undefined ?? null }
   }
 
+  openCash(actor: StaffIdentity, raw: unknown): CashOpening {
+    const input = z.object({ requestId: z.string().uuid(), openingPaise: z.number().int().min(0).max(1_000_000_000) }).strict().parse(raw)
+    return this.transaction(() => {
+      const prior = this.db.prepare(`SELECT id, opening_paise AS openingPaise, actor,
+        created_at AS createdAt FROM cash_openings WHERE request_id=?`).get(input.requestId) as CashOpening | undefined
+      if (prior) {
+        if (prior.openingPaise !== input.openingPaise) throw new Error('This drawer-opening request was used with another amount.')
+        return prior
+      }
+      if (this.cashSummary().currentOpening) throw new Error('The cash drawer is already open. Refresh the cashier screen.')
+      const lastClose = this.db.prepare('SELECT id FROM cash_closes ORDER BY rowid DESC LIMIT 1').get() as { id: string } | undefined
+      const openingId = randomUUID()
+      this.db.prepare(`INSERT INTO cash_openings(id,request_id,after_close_id,opening_paise,actor)
+        VALUES(?,?,?,?,?)`).run(openingId, input.requestId, lastClose?.id ?? null, input.openingPaise, actor.username)
+      this.audit(actor, 'cash.opened', openingId, input)
+      return this.db.prepare(`SELECT id,opening_paise AS openingPaise,actor,created_at AS createdAt
+        FROM cash_openings WHERE id=?`).get(openingId) as unknown as CashOpening
+    })
+  }
+
   closeCash(actor: StaffIdentity, raw: unknown): CashClose {
-    const input = z.object({ requestId: z.string().uuid(), openingPaise: z.number().int().min(0).max(1_000_000_000),
-      countedPaise: z.number().int().min(0).max(1_000_000_000), notes: z.string().trim().max(250) }).parse(raw)
+    const input = z.object({ requestId: z.string().uuid(), openingPaise: z.number().int().min(0).max(1_000_000_000).optional(),
+      countedPaise: z.number().int().min(0).max(1_000_000_000), notes: z.string().trim().max(250) }).strict().parse(raw)
     return this.transaction(() => {
       const prior = this.db.prepare(`SELECT id, opening_paise AS openingPaise, receipts_paise AS receiptsPaise,
         expected_paise AS expectedPaise, counted_paise AS countedPaise, variance_paise AS variancePaise, notes, actor, created_at AS createdAt
         FROM cash_closes WHERE request_id = ?`).get(input.requestId) as unknown as CashClose | undefined
       if (prior) {
-        if (prior.openingPaise !== input.openingPaise || prior.countedPaise !== input.countedPaise || prior.notes !== input.notes) throw new Error('This closing request was already used with different amounts.')
+        if ((input.openingPaise !== undefined && prior.openingPaise !== input.openingPaise) || prior.countedPaise !== input.countedPaise || prior.notes !== input.notes) throw new Error('This closing request was already used with different amounts.')
         return prior
       }
-      const receipts = this.cashSummary().receiptsPaise
+      const summary = this.cashSummary()
+      const opening = summary.currentOpening
+      if (!opening) throw new Error('Enter and save the opening cash amount before closing the drawer.')
+      if (input.openingPaise !== undefined && input.openingPaise !== opening.openingPaise)
+        throw new Error('Opening cash differs from the amount saved when the drawer was opened.')
+      const receipts = summary.receiptsPaise
       const cutoff = (this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS value FROM payment_tenders').get() as { value: number }).value
       const refundCutoff = (this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS value FROM payment_refunds').get() as { value: number }).value
       const movementCutoff = (this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS value FROM delivery_cash_movements').get() as { value: number }).value
-      const expected = input.openingPaise + receipts
+      const expected = opening.openingPaise + receipts
       if (input.countedPaise !== expected && input.notes.length < 3) throw new Error('Explain the cash variance before closing.')
       const closeId = randomUUID()
       this.db.prepare(`INSERT INTO cash_closes(id, request_id, payment_cutoff, opening_paise, receipts_paise,
         expected_paise, counted_paise, variance_paise, notes, actor, refund_cutoff, movement_cutoff) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(closeId,
-        input.requestId, cutoff, input.openingPaise, receipts, expected, input.countedPaise, input.countedPaise - expected, input.notes, actor.username, refundCutoff, movementCutoff)
-      this.audit(actor, 'cash.closed', closeId, { ...input, receiptsPaise: receipts, expectedPaise: expected })
+        input.requestId, cutoff, opening.openingPaise, receipts, expected, input.countedPaise, input.countedPaise - expected, input.notes, actor.username, refundCutoff, movementCutoff)
+      this.audit(actor, 'cash.closed', closeId, { ...input, openingPaise: opening.openingPaise, receiptsPaise: receipts, expectedPaise: expected })
       return this.cashSummary().lastClose!
     })
   }

@@ -1,0 +1,13 @@
+{
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": { "EXPO_PUBLIC_LAN_PREVIEW": "1" }
+    },
+    "production": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" }
+    }
+  }
+}

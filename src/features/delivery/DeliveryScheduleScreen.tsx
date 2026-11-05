@@ -15,7 +15,6 @@ import { deliveryDelayMinutes, filterDeliverySchedule } from '../../../shared/de
 import { riderSettlementSummary } from '../../../shared/deliverySettlement'
 import {
   assignDeliveryRider,
-  assignDeliveryRiderBatch,
   listDeliveryEvents,
   getRiderRunState,
   issueDeliveryFloat,
@@ -34,6 +33,7 @@ interface DeliveryScheduleScreenProps {
   canManageRiders: boolean
   canReassign: boolean
   onClose: () => void
+  onSelectHdCardsForAssignment: (rider: Pick<DeliveryRider, 'id' | 'name'>) => void
 }
 
 function dateValue(value: string | null): Date | null {
@@ -73,6 +73,7 @@ export function DeliveryScheduleScreen({
   canManageRiders,
   canReassign,
   onClose,
+  onSelectHdCardsForAssignment,
 }: DeliveryScheduleScreenProps) {
   const [entries, setEntries] = useState<DeliveryScheduleEntry[]>([])
   const [riders, setRiders] = useState<DeliveryRider[]>([])
@@ -91,7 +92,6 @@ export function DeliveryScheduleScreen({
   const [assignmentReason, setAssignmentReason] = useState('')
   const [riderSearch, setRiderSearch] = useState('')
   const [batchAssignOpen, setBatchAssignOpen] = useState(false)
-  const [batchOrderIds, setBatchOrderIds] = useState<string[]>([])
   const [batchRiderId, setBatchRiderId] = useState('')
   const [printOrderIds, setPrintOrderIds] = useState<string[]>([])
   const [settlementOpen, setSettlementOpen] = useState(false)
@@ -205,10 +205,8 @@ export function DeliveryScheduleScreen({
     })
   }, [assignOrder, canReassign, riderSearch, riders])
 
-  const batchCandidates = entries.filter(entry => ['ordering', 'preparing', 'ready'].includes(entry.foodStatus)
-    && entry.deliveryStatus === 'pending' && !entry.rider && entry.paymentStatus !== 'voided')
   const batchRiders = riders.filter(rider => rider.active && rider.availability === 'available'
-    && rider.maxActiveDeliveries - rider.activeDeliveryCount >= batchOrderIds.length)
+    && rider.maxActiveDeliveries - rider.activeDeliveryCount >= 1)
   const printEntries = entries.filter(entry => printOrderIds.includes(entry.id) && entry.paymentStatus === 'unpaid')
   const settlementRider = riders.find(rider => rider.id === settlementRiderId) ?? null
   const settlement = riderSettlementSummary(entries, settlementRiderId, settlementFrom, settlementTo)
@@ -256,24 +254,6 @@ export function DeliveryScheduleScreen({
       setHandoverError(`${cause instanceof Error ? cause.message : 'Run could not be closed.'} Check settlement history before retrying.`)
     } finally {
       setHandoverBusy(false)
-    }
-  }
-
-  async function saveBatchAssignment(): Promise<void> {
-    if (!batchOrderIds.length || !batchRiderId || busyOrderId) return
-    setBusyOrderId('batch')
-    setError('')
-    try {
-      await assignDeliveryRiderBatch({ orderIds: batchOrderIds, riderId: batchRiderId })
-      setNotice(`${batchOrderIds.length} delivery bills assigned to ${riders.find(rider => rider.id === batchRiderId)?.name ?? 'rider'}.`)
-      setBatchAssignOpen(false)
-      setBatchOrderIds([])
-      setBatchRiderId('')
-      await refresh(false)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The delivery run could not be assigned.')
-    } finally {
-      setBusyOrderId(null)
     }
   }
 
@@ -396,7 +376,7 @@ export function DeliveryScheduleScreen({
         </div>
         <div className="delivery-schedule-header-actions">
           {canManageRiders && <button onClick={() => openRiderEditor('new')}><Plus size={16} /> Add rider</button>}
-          <button onClick={() => { setBatchOrderIds([]); setBatchRiderId(''); setBatchAssignOpen(true) }}><Truck size={15} /> Assign multiple</button>
+          <button onClick={() => { setBatchRiderId(''); setBatchAssignOpen(true) }}><Truck size={15} /> Assign delivery</button>
           <button onClick={() => { setSettlementRiderId(riders[0]?.id ?? ''); setSettlementOpen(true) }}><Users size={15} /> Rider settlement</button>
           <button onClick={() => void refresh()} disabled={loading}><RefreshCw size={15} /> Refresh</button>
           <button className="delivery-schedule-close" onClick={onClose} aria-label="Close delivery schedule"><X size={18} /></button>
@@ -491,15 +471,15 @@ export function DeliveryScheduleScreen({
       {batchAssignOpen && <div className="delivery-modal-backdrop" role="presentation">
         <section className="delivery-modal delivery-run-modal" role="dialog" aria-modal="true" aria-labelledby="delivery-run-title">
           <header><div><span className="delivery-action-icon"><Truck size={19} /></span><h2 id="delivery-run-title">Assign delivery run</h2></div><button onClick={() => setBatchAssignOpen(false)} aria-label="Close delivery run"><X size={18} /></button></header>
-          <p>Select the delivery boy, then tick each HD bill for this run. All assignments save together when you press Done.</p>
-          <label className="delivery-modal-field"><span>Delivery staff</span><select value={batchRiders.some(rider => rider.id === batchRiderId) ? batchRiderId : ''} onChange={event => setBatchRiderId(event.target.value)}><option value="">Select staff</option>{batchRiders.map(rider => <option key={rider.id} value={rider.id}>{rider.name} · {rider.contactNumber || 'No phone'} · {rider.maxActiveDeliveries - rider.activeDeliveryCount} spaces</option>)}</select></label>
-          {batchRiders.length === 0 && <p>No rider has space for {batchOrderIds.length || 1} bills. Edit the rider’s maximum active deliveries first.</p>}
-          <div className="delivery-run-list">
-            {batchCandidates.length === 0 && <p>No unassigned HD orders are available.</p>}
-            {batchCandidates.map(entry => <label key={entry.id} className="delivery-run-option"><input type="checkbox" checked={batchOrderIds.includes(entry.id)} onChange={event => setBatchOrderIds(current => event.target.checked ? [...current, entry.id] : current.filter(id => id !== entry.id))} /><span><b>{entry.reference} · {formatMoney(entry.totalPaise)}</b><small>{entry.customerName || 'Customer'} · {entry.contactNumber || 'No customer phone'}<br />{[entry.deliveryArea, entry.deliveryLandmark, entry.deliveryAddress].filter(Boolean).join(' · ') || 'No address entered'}</small></span></label>)}
-          </div>
+          <p>Select the delivery boy. The HD card board opens immediately so you can choose every bill for this run.</p>
+          <label className="delivery-modal-field"><span>Delivery staff</span><select value={batchRiders.some(rider => rider.id === batchRiderId) ? batchRiderId : ''} onChange={event => {
+            const rider = batchRiders.find(candidate => candidate.id === event.target.value)
+            setBatchRiderId(event.target.value)
+            if (rider) { setBatchAssignOpen(false); onSelectHdCardsForAssignment({ id: rider.id, name: rider.name }) }
+          }}><option value="">Select staff</option>{batchRiders.map(rider => <option key={rider.id} value={rider.id}>{rider.name} · {rider.contactNumber || 'No phone'} · {rider.maxActiveDeliveries - rider.activeDeliveryCount} spaces</option>)}</select></label>
+          {batchRiders.length === 0 && <p>No delivery boy has space for another bill. Edit rider capacity or settle an active run first.</p>}
           {error && <div className="delivery-schedule-error" role="alert">{error}</div>}
-          <footer><button onClick={() => setBatchAssignOpen(false)}>Cancel</button><button className="primary" onClick={() => void saveBatchAssignment()} disabled={!batchOrderIds.length || !batchRiderId || !batchRiders.some(rider => rider.id === batchRiderId) || Boolean(busyOrderId)}>{busyOrderId === 'batch' ? 'Saving…' : `Done · assign ${batchOrderIds.length}`}</button></footer>
+          <footer><button onClick={() => setBatchAssignOpen(false)}>Cancel</button></footer>
         </section>
       </div>}
 

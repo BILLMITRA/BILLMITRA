@@ -12,9 +12,9 @@
   --ink: #202822;
   --muted: #7b837e;
   --line: #e9ece8;
-  --green: #2b805b;
-  --green-dark: #176745;
-  --green-pale: #edf7f1;
+  --green: #b33732;
+  --green-dark: #922c29;
+  --green-pale: #fff0ee;
 }
 
 * { box-sizing: border-box; }
@@ -30,10 +30,10 @@ button, input, textarea { font: inherit; }
 select { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible {
-  outline: 3px solid rgba(43, 128, 91, .3);
+  outline: 3px solid rgba(179, 55, 50, .3);
   outline-offset: 2px;
 }
 
-::selection { color: #174c35; background: #d9f1e2; }
+::selection { color: #86231f; background: #f8d8d5; }
 
 #root { height: 100vh; min-height: 0; overflow: hidden; }

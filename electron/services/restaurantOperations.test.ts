@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createPosBackend } from '../backend.cjs'
 import { FinancialManagementService } from './financialManagement.cjs'
-import type { Category, Product, SavedOrder, PaymentRecord } from '../../shared/domain'
+import type { Category, Product, SavedOrder, PaymentRecord, MenuData } from '../../shared/domain'
 import type { CashClose, CashSummary, InventoryItem, MenuCatalog, PaymentLedger, SalesReport, StockMovement, KitchenQueue } from '../../shared/restaurant'
 
 let backend: ReturnType<typeof createPosBackend>
@@ -22,6 +25,83 @@ beforeEach(() => { backend = createPosBackend(':memory:'); invoke('staff:setup-o
 afterEach(() => backend.close())
 
 describe('restaurant operations', () => {
+  it('adds dining tables for managers, prevents duplicates and rejects unauthorized staff', () => {
+    invoke('staff:create', { username: 'manager', displayName: 'Manager', role: 'manager', password })
+    invoke('staff:create', { username: 'cashier', displayName: 'Cashier', role: 'cashier', password })
+    invoke('staff:login', { username: 'manager', password }, 2)
+    invoke('staff:login', { username: 'cashier', password }, 3)
+    const added = invoke<{ id: string }>('tables:add', { name: '21', floor: 'ground floor', capacity: 4 }, 2)
+    expect(invoke<MenuData>('pos:load-menu').tables.find(table => table.id === added.id)).toMatchObject({ name: '21', floor: 'Ground Floor', capacity: 4, status: 'available' })
+    expect(() => invoke('tables:add', { name: '21', floor: 'GROUND FLOOR', capacity: 4 }, 2)).toThrow('already exists')
+    expect(() => invoke('tables:add', { name: '22', floor: 'Floor 2', capacity: 0 }, 2)).toThrow()
+    expect(() => invoke('tables:add', { name: '22', floor: 'Floor 2', capacity: 4 }, 3)).toThrow('permission')
+  })
+  it('saves card counts and refuses to hide an active order', () => {
+    createBill(7)
+    expect(() => invoke('cards:save-settings', { parcelCount: 6, deliveryCount: 10 })).toThrow('P-7')
+    invoke('cards:save-settings', { parcelCount: 7, deliveryCount: 10 })
+    expect(invoke<MenuData>('pos:load-menu').cardSettings).toEqual({ parcelCount: 7, deliveryCount: 10 })
+    expect(() => invoke('cards:save-settings', { parcelCount: 101, deliveryCount: 10 })).toThrow()
+  })
+  it('keeps one opening amount across app restarts and requires a new opening after closing', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'billmitra-cash-opening-'))
+    const path = join(directory, 'pos.sqlite')
+    let persistent = createPosBackend(path)
+    try {
+      persistent.invoke('staff:setup-owner', 9, owner)
+      persistent.invoke('cash:open', 9, { requestId: randomUUID(), openingPaise: 25000 })
+      persistent.close()
+      persistent = createPosBackend(path)
+      persistent.invoke('staff:login', 9, owner)
+      expect((persistent.invoke('cash:summary', 9) as CashSummary).currentOpening?.openingPaise).toBe(25000)
+      expect(() => persistent.invoke('cash:open', 9, { requestId: randomUUID(), openingPaise: 0 })).toThrow('already open')
+      persistent.invoke('cash:close', 9, { requestId: randomUUID(), countedPaise: 25000, notes: '' })
+      expect((persistent.invoke('cash:summary', 9) as CashSummary).currentOpening).toBeNull()
+      persistent.invoke('cash:open', 9, { requestId: randomUUID(), openingPaise: 18000 })
+      expect((persistent.invoke('cash:summary', 9) as CashSummary).currentOpening?.openingPaise).toBe(18000)
+    } finally { persistent.close(); rmSync(directory, { recursive: true, force: true }) }
+  })
+  it('waits for customer selection before preparing a delivery KOT', () => {
+    const catalog = invoke<MenuCatalog>('menu:catalog')
+    const product = catalog.products.find(item => item.available)!
+    const order = invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'delivery', deliveryNumber: 1, tableId: null,
+      customerName: '', contactNumber: '', deliveryAddress: '', discount: null,
+      deferKitchenTicket: true, items: [{ productId: product.id, quantity: 1, note: '' }],
+    })
+    expect(invoke<KitchenQueue>('kitchen:queue').orders).toHaveLength(0)
+    const customer = invoke<{ id: string }>('delivery:save-customer', { customerName: 'Shan',
+      contactNumber: '9656684727', deliveryAddress: 'Vengara market', deliveryArea: 'Vengara',
+      deliveryLandmark: '', deliveryInstructions: 'Call on arrival' })
+    expect(invoke<Array<{ id: string }>>('delivery:list-customers', '727')[0].id).toBe(customer.id)
+    const finish = { requestId: randomUUID(), type: 'delivery', deliveryNumber: 1, tableId: null,
+      orderId: order.id, customerName: 'Shan', contactNumber: '9656684727',
+      deliveryAddress: 'Vengara market', deliveryArea: 'Vengara', deliveryLandmark: '',
+      deliveryInstructions: 'Call on arrival', discount: null, prepareKitchenTicket: true, items: [] }
+    invoke<SavedOrder>('pos:create-order', finish)
+    expect(invoke<KitchenQueue>('kitchen:queue').orders).toHaveLength(1)
+    invoke<SavedOrder>('pos:create-order', { ...finish, requestId: randomUUID() })
+    expect(invoke<KitchenQueue>('kitchen:queue').orders).toHaveLength(1)
+  })
+
+  it('allows a takeaway order without a pickup name', () => {
+    const catalog = invoke<MenuCatalog>('menu:catalog')
+    const product = catalog.products.find(item => item.available)!
+    const saved = invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'parcel', parcelNumber: 1, tableId: null,
+      customerName: '', deliveryAddress: '', discount: null,
+      items: [{ productId: product.id, quantity: 1, note: '' }],
+    })
+    expect(saved).toMatchObject({ type: 'parcel', parcelNumber: 1, customerName: '' })
+    const linked = invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'parcel', parcelNumber: 1, tableId: null, orderId: saved.id,
+      customerName: 'Guest', contactNumber: '928', deliveryAddress: '', deliveryArea: 'Vengara',
+      discount: null, items: [],
+    })
+    expect(linked).toMatchObject({ customerName: 'Guest', contactNumber: '928', deliveryArea: 'Vengara' })
+    expect(invoke<Array<{ contactNumber: string }>>('delivery:list-customers', '928')[0].contactNumber).toBe('928')
+  })
+
   it('saves categories and products while preserving historical invoice snapshots', () => {
     const { saved, product } = createBill()
     const category = invoke<Category>('menu:save-category', { name: 'Chef specials', sortOrder: 10 })
@@ -37,13 +117,45 @@ describe('restaurant operations', () => {
   it('enforces backend roles for menu, reports, stock, kitchen, refunds, and cash closing', () => {
     invoke('staff:create', { username: 'cashier', displayName: 'Cashier', role: 'cashier', password })
     invoke('staff:login', { username: 'cashier', password }, 2)
-    for (const channel of ['menu:catalog', 'reports:sales', 'inventory:list', 'kitchen:queue', 'cash:summary', 'payments:refund']) {
+    for (const channel of ['menu:catalog', 'reports:sales', 'inventory:list', 'kitchen:queue', 'payments:refund']) {
       expect(() => invoke(channel, {}, 2)).toThrow('permission')
     }
+    expect(invoke<CashSummary>('cash:summary', undefined, 2).currentOpening).toBeNull()
+    expect(invoke('cash:open', { requestId: randomUUID(), openingPaise: 0 }, 2)).toMatchObject({ openingPaise: 0 })
+    expect(() => invoke('cash:close', { requestId: randomUUID(), countedPaise: 0, notes: '' }, 2)).toThrow('permission')
     invoke('staff:create', { username: 'accountant', displayName: 'Accountant', role: 'accountant', password })
     invoke('staff:login', { username: 'accountant', password }, 3)
     expect(invoke<SalesReport>('reports:sales', period(), 3).paidBills).toBe(0)
     expect(() => invoke('menu:catalog', undefined, 3)).toThrow('permission')
+  })
+
+  it('requires the numeric manager PIN and a permitted role to open Management', () => {
+    invoke('staff:create', { username: 'manager', displayName: 'Manager', role: 'manager', password })
+    invoke('staff:create', { username: 'cashier', displayName: 'Cashier', role: 'cashier', password })
+    invoke('staff:login', { username: 'manager', password }, 2)
+    invoke('staff:login', { username: 'cashier', password }, 3)
+    expect(() => invoke('pos:authorize-management', '1234', 2)).toThrow('Ask the owner to set a manager PIN')
+    invoke('pos:set-manager-pin', '1234')
+    expect(() => invoke('pos:authorize-management', '1234', 3)).toThrow('permission')
+    expect(() => invoke('pos:authorize-management', '0000', 2)).toThrow('Incorrect manager PIN')
+    expect(invoke('pos:authorize-management', '1234', 2)).toBeUndefined()
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect(() => invoke('pos:authorize-management', '0000', 2)).toThrow(attempt === 4 ? 'Too many incorrect PIN attempts' : 'Incorrect manager PIN')
+    }
+    expect(() => invoke('pos:authorize-management', '1234', 2)).toThrow('temporarily locked')
+  })
+
+  it('lets only the owner replace a forgotten PIN after confirming the owner password', () => {
+    const manager = invoke<{ id: string }>('staff:create', { username: 'manager', displayName: 'Manager', role: 'manager', password })
+    invoke('staff:login', { username: 'manager', password }, 2)
+    invoke('pos:set-manager-pin', '1234')
+    expect(() => invoke('pos:reset-manager-pin', { ownerPassword: password, pin: '5678' }, 2)).toThrow('permission')
+    expect(manager.id).toBeTruthy()
+    expect(() => invoke('pos:reset-manager-pin', { ownerPassword: 'wrong-password', pin: '5678' })).toThrow('Invalid username or password')
+    expect(invoke('pos:authorize-management', '1234')).toBeUndefined()
+    expect(invoke('pos:reset-manager-pin', { ownerPassword: password, pin: '5678' })).toBeUndefined()
+    expect(() => invoke('pos:authorize-management', '1234')).toThrow('Incorrect manager PIN')
+    expect(invoke('pos:authorize-management', '5678')).toBeUndefined()
   })
 
   it('records stock adjustments once and rolls back negative stock', () => {
@@ -173,6 +285,24 @@ describe('restaurant operations', () => {
     expect(() => invoke('payments:collect', { requestId: randomUUID(), orderId: one.id, method: 'cash', amountPaise: 100 })).toThrow('joined')
   })
 
+  it('joins bills from different tables and releases the second table', () => {
+    const menu = invoke<MenuData>('pos:load-menu')
+    const product = menu.products.find(item => item.available)!
+    const create = (tableId: string) => invoke<SavedOrder>('pos:create-order', {
+      requestId: randomUUID(), type: 'dine_in', tableId, customerName: '', deliveryAddress: '', discount: null,
+      items: [{ productId: product.id, quantity: 1, note: '' }],
+    })
+    const first = create(menu.tables[0].id); const second = create(menu.tables[1].id)
+    const combined = invoke<SavedOrder>('pos:join-orders', { requestId: randomUUID(), orderIds: [first.id, second.id] })
+    expect(combined.tableId).toBe(first.tableId)
+    expect(combined.totalPaise).toBe(first.totalPaise + second.totalPaise)
+    const updated = invoke<MenuData>('pos:load-menu')
+    expect(updated.tables.find(table => table.id === first.tableId)?.orderId).toBe(combined.id)
+    expect(updated.tables.find(table => table.id === second.tableId)?.status).toBe('available')
+    expect(invoke<SavedOrder>('pos:get-order', first.id).status).toBe('joined')
+    expect(invoke<SavedOrder>('pos:get-order', second.id).status).toBe('joined')
+  })
+
   it('caps refunds at the original tender, keeps the invoice paid, and reconciles cash/report totals', () => {
     const { saved } = createBill()
     const ledger = invoke<PaymentLedger>('payments:collect', { requestId: randomUUID(), orderId: saved.id, method: 'cash', amountPaise: saved.totalPaise })
@@ -189,15 +319,39 @@ describe('restaurant operations', () => {
   it('uses cash ledger cutoffs to avoid counting receipts and refunds twice', () => {
     const { saved } = createBill()
     const ledger = invoke<PaymentLedger>('payments:collect', { requestId: randomUUID(), orderId: saved.id, method: 'cash', amountPaise: saved.totalPaise })
+    const opening = { requestId: randomUUID(), openingPaise: 50000 }
+    expect(invoke('cash:open', opening)).toMatchObject({ openingPaise: 50000 })
+    expect(invoke('cash:open', opening)).toMatchObject({ openingPaise: 50000 })
+    expect(() => invoke('cash:open', { requestId: randomUUID(), openingPaise: 1 })).toThrow('already open')
     const input = { requestId: randomUUID(), openingPaise: 50000, countedPaise: 50000 + saved.totalPaise, notes: '' }
     const close = invoke<CashClose>('cash:close', input)
     expect(invoke<CashClose>('cash:close', input).id).toBe(close.id)
     expect(invoke<CashSummary>('cash:summary').receiptsPaise).toBe(0)
+    expect(invoke<CashSummary>('cash:summary').currentOpening).toBeNull()
     invoke('payments:refund', { requestId: randomUUID(), tenderId: ledger.tenders[0].id, amountPaise: 100, reason: 'Customer return' })
     expect(invoke<CashSummary>('cash:summary').receiptsPaise).toBe(-100)
-    expect(() => invoke('cash:close', { ...input, requestId: randomUUID(), countedPaise: 0, openingPaise: 0 })).toThrow('variance')
+    expect(() => invoke('cash:close', { ...input, requestId: randomUUID(), countedPaise: 0, openingPaise: 0 })).toThrow('opening cash amount')
+    invoke('cash:open', { requestId: randomUUID(), openingPaise: 100 })
+    expect(() => invoke('cash:close', { ...input, requestId: randomUUID(), countedPaise: 0, openingPaise: 0 })).toThrow('differs')
+    expect(() => invoke('cash:close', { requestId: randomUUID(), countedPaise: 1, notes: '' })).toThrow('variance')
     invoke('cash:close', { requestId: randomUUID(), openingPaise: 100, countedPaise: 0, notes: 'Cash refund' })
     expect(invoke<CashSummary>('cash:summary').receiptsPaise).toBe(0)
+  })
+
+  it('keeps an unpaid table open after drawer closing and clears it after cash payment', () => {
+    const menu = invoke<MenuData>('pos:load-menu')
+    const table = menu.tables[0]
+    const product = invoke<MenuCatalog>('menu:catalog').products.find(item => item.available)!
+    const bill = invoke<SavedOrder>('pos:create-order', { requestId: randomUUID(), type: 'dine_in', tableId: table.id,
+      customerName: '', deliveryAddress: '', discount: null, items: [{ productId: product.id, quantity: 1, note: '' }] })
+    invoke('cash:open', { requestId: randomUUID(), openingPaise: 0 })
+    invoke('cash:close', { requestId: randomUUID(), countedPaise: 0, notes: '' })
+    expect(invoke<MenuData>('pos:load-menu').activeOrders.some(order => order.id === bill.id)).toBe(true)
+    invoke('pos:record-payment', { requestId: randomUUID(), orderId: bill.id, method: 'cash' })
+    const refreshed = invoke<MenuData>('pos:load-menu')
+    expect(refreshed.activeOrders.some(order => order.id === bill.id)).toBe(false)
+    expect(refreshed.tables.find(item => item.id === table.id)?.status).toBe('available')
+    expect(invoke<CashSummary>('cash:summary').receiptsPaise).toBe(bill.totalPaise)
   })
 
   it('validates report dates and reports the remaining amount on a partially paid bill', () => {

@@ -1,7 +1,7 @@
-.manager-action-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 20px; background: #16231bc9; }
+.manager-action-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 20px; background: #251a1bc9; }
 .manager-action-dialog { width: min(430px, 100%); padding: 23px; border: 1px solid #e8ece8; border-radius: 14px; background: #fff; box-shadow: 0 20px 70px #0005; }
 .manager-action-dialog > header { display: flex; align-items: center; justify-content: space-between; }
-.manager-action-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: #27734b; background: #eaf6ee; }
+.manager-action-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: #b33732; background: #fff0ee; }
 .manager-action-icon.void { color: #a34b3f; background: #fff0ed; }
 .manager-action-close { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #e5e9e5; border-radius: 8px; background: #fff; color: #667269; cursor: pointer; }
 .manager-action-close:disabled { opacity: .5; }
@@ -15,10 +15,15 @@
 .manager-action-error { margin-top: 12px; padding: 9px 10px; border: 1px solid #f1d2ce; border-radius: 7px; color: #a3473b; background: #fff4f1; font-size: 10px; line-height: 15px; }
 .manager-action-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .manager-action-dialog footer button { min-height: 40px; padding: 0 13px; border: 1px solid #e1e7e2; border-radius: 7px; background: #fff; color: #5c695f; font-size: 10px; font-weight: 700; cursor: pointer; }
-.manager-action-dialog footer .manager-action-submit { border-color: #286f4c; background: #286f4c; color: #fff; }
+.manager-action-field input:focus-visible, .manager-action-field textarea:focus-visible, .manager-action-field select:focus-visible { outline: 3px solid #f3cfca; border-color: #b33732; }
+.manager-action-dialog footer .manager-action-submit { border-color: #b33732; background: #b33732; color: #fff; }
 .manager-action-dialog footer .manager-action-submit.void { border-color: #a3473b; background: #a3473b; }
 .manager-action-dialog footer button:disabled { opacity: .6; cursor: wait; }
 .manager-action-security-note { display: block; margin-top: 12px; color: #89948c; font-size: 9px; line-height: 14px; }
+.manager-action-reset { display: block; margin-top: 12px; padding: 0; border: 0; background: none; color: #a72f2a; font-size: 11px; font-weight: 700; cursor: pointer; }
+.delivery-cash-out-amount { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; margin: 12px 0; border: 1px solid #f0cfcb; border-radius: 8px; background: #fff7f6; color: #a72f2a; font-size: 12px; }
+.delivery-cash-out-amount strong { font-size: 20px; }
+.manager-action-dialog footer .manager-action-submit { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .item-void-summary { display: grid; gap: 3px; margin-top: 12px; padding: 10px; border-radius: 8px; background: #f4f8f4; color: #425247; font-size: 11px; }
 .item-void-summary span { color: #708075; }
 .item-void-quantity { display: flex; align-items: center; gap: 10px; margin-top: 13px; color: #4d5b51; font-size: 11px; font-weight: 700; }

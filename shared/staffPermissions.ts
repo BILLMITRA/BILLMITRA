@@ -23,7 +23,7 @@ const permissions: Record<StaffRole, readonly StaffPermission[]> = {
   accountant: ['reports:view', 'bill:reprint'],
 }
 
-export const STAFF_PASSWORD_MIN_LENGTH = 12
+export const STAFF_PASSWORD_MIN_LENGTH = 4
 export const STAFF_PASSWORD_MAX_LENGTH = 128
 
 export function staffPermissionsForRole(role: StaffRole): readonly StaffPermission[] {

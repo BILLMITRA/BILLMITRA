@@ -1,0 +1,19 @@
+appId: com.billmitra.manager
+productName: BillMitra Manager
+directories:
+  output: release-manager
+files:
+  - dist/**/*
+  - electron-dist/**/*
+  - database/mysql/import-branch.cjs
+  - package.json
+asar: true
+win:
+  icon: src/assets/billmitra-red-symbol.ico
+  executableName: BillMitra Manager
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: BillMitra Manager

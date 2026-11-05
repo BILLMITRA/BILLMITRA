@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react'
-import { LockKeyhole, UtensilsCrossed, UserRound } from 'lucide-react'
+import { LockKeyhole, UserRound } from 'lucide-react'
+import billmitraLogo from '../../assets/billmitra-red-symbol.svg'
 import type { StaffIdentity } from '../../../shared/domain'
+import { STAFF_PASSWORD_MIN_LENGTH } from '../../../shared/staffPermissions'
 import { loginStaff, setupOwner } from '../../services/pos'
 import './staff.css'
 
@@ -42,8 +44,8 @@ export function StaffAccessScreen({ needsOwnerSetup, onAuthenticated }: StaffAcc
     <main className="staff-access-shell">
       <section className="staff-access-card" aria-labelledby="staff-access-title">
         <div className="staff-access-brand">
-          <span className="staff-access-mark"><UtensilsCrossed size={20} /></span>
-          <span><b>BillMitra</b><small>RESTAURANT POS</small></span>
+          <img className="staff-access-logo" src={billmitraLogo} alt="BillMitra" />
+          <span className="staff-access-brand-copy"><b>BillMitra</b><small>RESTAURANT POS</small></span>
         </div>
         <span className="staff-access-icon">{needsOwnerSetup ? <LockKeyhole size={20} /> : <UserRound size={20} />}</span>
         <h1 id="staff-access-title">{needsOwnerSetup ? 'Set up your owner account' : 'Staff sign in'}</h1>
@@ -77,7 +79,7 @@ export function StaffAccessScreen({ needsOwnerSetup, onAuthenticated }: StaffAcc
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              minLength={needsOwnerSetup ? 12 : 1}
+              minLength={needsOwnerSetup ? STAFF_PASSWORD_MIN_LENGTH : 1}
               maxLength={128}
               autoComplete={needsOwnerSetup ? 'new-password' : 'current-password'}
               required
@@ -90,14 +92,14 @@ export function StaffAccessScreen({ needsOwnerSetup, onAuthenticated }: StaffAcc
                 type="password"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
-                minLength={12}
+                minLength={STAFF_PASSWORD_MIN_LENGTH}
                 maxLength={128}
                 autoComplete="new-password"
                 required
               />
             </label>
           )}
-          {needsOwnerSetup && <small className="staff-access-hint">Use at least 12 characters. Passwords are hashed locally and cannot be retrieved.</small>}
+          {needsOwnerSetup && <small className="staff-access-hint">Use at least {STAFF_PASSWORD_MIN_LENGTH} characters. Passwords are hashed locally and cannot be retrieved.</small>}
           {error && <div className="staff-access-error" role="alert">{error}</div>}
           <button type="submit" disabled={submitting}>
             {submitting ? 'Please wait…' : needsOwnerSetup ? 'Create owner account' : 'Sign in'}

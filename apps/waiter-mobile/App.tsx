@@ -1,25 +1,40 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, AppState, Modal, Platform, Pressable, SafeAreaView, ScrollView, StatusBar as NativeStatusBar, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react'
+import { Alert, AppState, BackHandler, Modal, Platform, Pressable, SafeAreaView, ScrollView, StatusBar as NativeStatusBar, StyleSheet, Text, TextInput, View } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
+import * as Notifications from 'expo-notifications'
 import * as Crypto from 'expo-crypto'
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio'
 import { adjustProduct, productQuantity, tableFloors } from './src/draft'
-import { ApiError, getMenu, login, logout, requestPrint, saveBill, sendOrder, serverUrl, type Line, type Menu, type OrderInput, type PrintInput, type SaveBillInput, type Session } from './src/api'
-import { clearPending, clearPendingPrint, clearPendingSave, clearSession, getDraft, getPending, getPendingPrint, getPendingSave, loadSession, putDraft, putPending, putPendingPrint, putPendingSave, saveSession, scopeOf } from './src/storage'
+import { acknowledgeKitchenNotice, acknowledgeWaitingAlert, ApiError, confirmWaitingSeat, getKitchenQueue, getMenu, login, logout, requestPrint, RESTAURANT_SERVER, saveBill, sendOrder, transferTable, type KitchenQueue, type Line, type Menu, type OrderInput, type PrintInput, type SaveBillInput, type Session } from './src/api'
+import { KitchenScreen } from './src/KitchenScreen'
+import { VoicePanel } from './src/VoicePanel'
+import { clearPending, clearPendingPrint, clearPendingSave, clearSession, copyLocalWorkToServer, getDraft, getPending, getPendingPrint, getPendingSave, hasHeardStaffNotification, hasHeardWaitingAlert, loadSession, markStaffNotificationHeard, markWaitingAlertHeard, putDraft, putPending, putPendingPrint, putPendingSave, saveSession, scopeOf } from './src/storage'
 import { orderTimer } from './src/orderTimer'
+import { isFreshNotification } from './src/notificationTime'
 import { TABLE_HOLD_MS, tableChanged, tableOrder } from './src/tableFlow'
+import { loadAlertSound, NotificationSettings, type AlertSound } from './src/NotificationSettings'
+import { registerStaffPushNotifications, showLocalStaffNotification, type StaffAlertType } from './src/pushNotifications'
 
-type Page = 'tables' | 'order' | 'menu' | 'review' | 'account'
+type Page = 'tables' | 'order' | 'menu' | 'review' | 'notifications' | 'messages' | 'account'
 const money = (paise: number) => `₹${(paise / 100).toFixed(2)}`
 const describe = (error: unknown) => error instanceof Error ? error.message : 'Please try again.'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
-  const [server, setServer] = useState('')
   const [branch, setBranch] = useState('main')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [menu, setMenu] = useState<Menu | null>(null)
-  const [page, setPage] = useState<Page>('tables')
+  const [kitchenQueue, setKitchenQueue] = useState<KitchenQueue | null>(null)
+  const [workspace, setWorkspace] = useState<'dining' | 'kitchen'>('dining')
+  const [page, setPageState] = useState<Page>('tables')
+  const pageRef = useRef<Page>('tables')
+  function setPage(next: Page) {
+    if (next === pageRef.current) return
+    pageRef.current = next
+    setPageState(next)
+  }
+  function resetPages() { pageRef.current = 'tables'; setPageState('tables') }
   const [floor, setFloor] = useState('Ground Floor')
   const [tableId, setTableId] = useState('')
   const [openedOrderId, setOpenedOrderId] = useState<string | null>(null)
@@ -38,16 +53,86 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [connectionError, setConnectionError] = useState('')
+  const [waitingSoundEnabled, setWaitingSoundEnabled] = useState(true)
+  const [alertSound, setAlertSound] = useState<AlertSound>(null)
   const [notice, setNotice] = useState('')
+  const [showTableMessage, setShowTableMessage] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
+  const [messageOpenSignal, setMessageOpenSignal] = useState(0)
+  const [staffUnreadCount, setStaffUnreadCount] = useState(0)
+  const [transferBusy, setTransferBusy] = useState(false)
   const draftWrites = useRef<Promise<void>>(Promise.resolve())
   const currentLines = useRef<Line[]>([])
   const printing = useRef(false)
   const saving = useRef(false)
+  const waitingPlayer = useRef<AudioPlayer | null>(null)
+  const notifyingWaiting = useRef(new Set<string>())
+  const waitingPushReady = useRef(false)
+  const notifyingKitchen = useRef(false)
+  const notifyingOrders = useRef(false)
+  const diningScroll = useRef<ComponentRef<typeof ScrollView> | null>(null)
+
+  useEffect(() => { void loadAlertSound().then(setAlertSound) }, [])
+  useEffect(() => {
+    const openMessage = (response: Notifications.NotificationResponse) => {
+      const type = response.notification.request.content.data?.type
+      if (type === 'staff-message') {
+        setPage('messages')
+        setMessageOpenSignal(value => value + 1)
+      } else if (type === 'kitchen-notice') setPage('notifications')
+      else if (type === 'customer-waiting') setPage('tables')
+      else if (type !== 'kitchen-order') return
+      void Notifications.clearLastNotificationResponseAsync().catch(() => {})
+    }
+    const listener = Notifications.addNotificationResponseReceivedListener(openMessage)
+    void Notifications.getLastNotificationResponseAsync().then(response => { if (response) openMessage(response) }).catch(() => {})
+    return () => listener.remove()
+  }, [])
+  useEffect(() => {
+    waitingPushReady.current = false
+    if (!session) return
+    let active = true
+    void registerStaffPushNotifications(session).then(token => {
+      if (active) waitingPushReady.current = Boolean(token)
+    }).catch(() => {})
+    return () => { active = false; waitingPushReady.current = false }
+  }, [session])
+  const playAlertSound = useCallback(async () => {
+    try {
+      await setAudioModeAsync({ playsInSilentMode: false, allowsRecording: false })
+      waitingPlayer.current?.release()
+      waitingPlayer.current = createAudioPlayer(alertSound ? { uri: alertSound.uri } : require('./assets/waiting_chime.wav'))
+      waitingPlayer.current.play()
+    } catch { /* The native notification still appears if playback fails. */ }
+  }, [alertSound])
+  const notifyStaff = useCallback((title: string, message: string, messageId?: string, type: StaffAlertType = 'staff-message') => {
+    if (AppState.currentState !== 'active') return
+    if (type === 'staff-message' && messageId && waitingPushReady.current) return
+    void (async () => {
+      try {
+        await showLocalStaffNotification(title, message, type, messageId ?? `${type}-${Date.now()}`)
+      } catch { /* Android notification permission or delivery may be unavailable. */ }
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (!session || session.workspace === 'kitchen') return
+    const listener = BackHandler.addEventListener('hardwareBackPress', () => {
+      const current = pageRef.current
+      const next: Page = current === 'review' ? 'menu' : current === 'menu' ? 'order' : 'tables'
+      pageRef.current = next; setPageState(next); diningScroll.current?.scrollTo({ y: 0, animated: false }); return true
+    })
+    return () => listener.remove()
+  }, [session, page])
 
   function replaceLines(next: Line[]) { currentLines.current = next; setLines(next) }
 
   const refresh = useCallback(async (active: Session) => {
-    try { setMenu(await getMenu(active)); setConnected(true); setConnectionError('') }
+    try {
+      if (active.workspace === 'kitchen') setKitchenQueue(await getKitchenQueue(active))
+      else setMenu(await getMenu(active))
+      setConnected(true); setConnectionError('')
+    }
     catch (cause) {
       setConnected(false)
       if (cause instanceof ApiError && cause.kind === 'http' && cause.status === 401) {
@@ -61,31 +146,104 @@ export default function App() {
       try {
         const saved = await loadSession()
         if (!saved) return
-        setSession(saved); setServer(saved.server); setBranch(saved.branch.id)
-        setPending(await getPending(scopeOf(saved)))
-        setPendingPrint(await getPendingPrint(scopeOf(saved)))
-        setPendingSave(await getPendingSave(scopeOf(saved)))
-        await refresh(saved)
+        if (saved.server !== RESTAURANT_SERVER) await copyLocalWorkToServer(saved, RESTAURANT_SERVER)
+        const active = { ...saved, server: RESTAURANT_SERVER }
+        if (saved.server !== RESTAURANT_SERVER) await saveSession(active)
+        setSession(active); setBranch(active.branch.id); setWorkspace(active.workspace ?? 'dining')
+        if (active.workspace !== 'kitchen') {
+          setPending(await getPending(scopeOf(active)))
+          setPendingPrint(await getPendingPrint(scopeOf(active)))
+          setPendingSave(await getPendingSave(scopeOf(active)))
+        }
+        await refresh(active)
       } catch (cause) { setError(describe(cause)) }
     })()
   }, [refresh])
   useEffect(() => {
     if (!session) return
-    const timer = setInterval(() => { if (AppState.currentState === 'active') void refresh(session) }, 15000)
+    const timer = setInterval(() => { if (AppState.currentState === 'active') void refresh(session) }, 5000)
     const clock = setInterval(() => { if (AppState.currentState === 'active') setNow(Date.now()) }, 1000)
     const listener = AppState.addEventListener('change', state => { if (state === 'active') { setNow(Date.now()); void refresh(session) } })
     return () => { clearInterval(timer); clearInterval(clock); listener.remove() }
   }, [session, refresh])
+  useEffect(() => () => { waitingPlayer.current?.release() }, [])
+  useEffect(() => {
+    if (!session || session.workspace === 'kitchen' || !menu?.notices?.length || !connected || notifyingKitchen.current || AppState.currentState !== 'active') return
+    notifyingKitchen.current = true
+    void (async () => {
+      try {
+        const scope = scopeOf(session)
+        for (const item of menu.notices ?? []) {
+          if (await hasHeardStaffNotification(scope, 'kitchen', item.id)) continue
+          await markStaffNotificationHeard(scope, 'kitchen', item.id)
+          if (!isFreshNotification(item.createdAt)) continue
+          const title = item.kind === 'delay' ? `Kitchen delay · ${item.tableName ?? 'Order'}` : 'Kitchen stock update'
+          const body = item.kind === 'delay'
+            ? `${item.delayMinutes ?? 0} minute delay${item.reason ? ` · ${item.reason}` : ''}`
+            : `${item.productName ?? 'Menu item'} is ${item.available ? 'available again' : 'unavailable'}.`
+          notifyStaff(title, body, item.id, 'kitchen-notice')
+        }
+      } finally { notifyingKitchen.current = false }
+    })().catch(() => { notifyingKitchen.current = false })
+  }, [session, menu?.notices, connected, notifyStaff])
+  useEffect(() => {
+    if (!session || session.workspace !== 'kitchen' || !kitchenQueue?.orders?.length || !connected || notifyingOrders.current || AppState.currentState !== 'active') return
+    notifyingOrders.current = true
+    void (async () => {
+      try {
+        const scope = scopeOf(session)
+        for (const order of kitchenQueue.orders) {
+          if (await hasHeardStaffNotification(scope, 'order', order.ticketId)) continue
+          await markStaffNotificationHeard(scope, 'order', order.ticketId)
+          if (!isFreshNotification(order.createdAt)) continue
+          const location = order.type === 'dine_in' ? `Table ${order.tableName ?? 'unknown'}` : order.type === 'delivery' ? 'Delivery' : 'Parcel'
+          const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0)
+          notifyStaff(`New KOT · ${location}`, `Order #${order.orderNumber} · ${itemCount} item${itemCount === 1 ? '' : 's'}`, order.ticketId, 'kitchen-order')
+        }
+      } finally { notifyingOrders.current = false }
+    })().catch(() => { notifyingOrders.current = false })
+  }, [session, kitchenQueue?.orders, connected, notifyStaff])
+  useEffect(() => {
+    if (!session || session.workspace === 'kitchen' || !menu?.waiting?.alerts || !connected) return
+    const scope = scopeOf(session)
+    for (const alert of menu.waiting.alerts) {
+      if (alert.acknowledgedAt != null || notifyingWaiting.current.has(alert.id)) continue
+      notifyingWaiting.current.add(alert.id)
+      void (async () => {
+        try {
+          if (!waitingSoundEnabled || AppState.currentState !== 'active' || waitingPushReady.current) return
+          if (await hasHeardWaitingAlert(scope, alert.id)) return
+          await markWaitingAlertHeard(scope, alert.id)
+          notifyStaff('Customer waiting', `Please check table ${alert.tableName}.`, alert.id, 'customer-waiting')
+        } catch { /* Alert stays visible if audio is unavailable. */ }
+        finally { notifyingWaiting.current.delete(alert.id) }
+      })()
+    }
+  }, [session, menu?.waiting?.alerts, connected, waitingSoundEnabled, notifyStaff])
+
+  async function confirmSeat(id: string, occupied: boolean) {
+    if (!session) return
+    try { await confirmWaitingSeat(session, id, occupied); await refresh(session) }
+    catch (cause) { setError(describe(cause)) }
+  }
+  async function acknowledgeWaiting(id: string) {
+    if (!session) return
+    try { await acknowledgeWaitingAlert(session, id); await refresh(session) }
+    catch (cause) { setError(describe(cause)) }
+  }
 
   async function signIn() {
     setBusy(true); setError(''); setConnectionError('')
     try {
-      const active = await login(serverUrl(server), branch.trim(), username.trim(), password)
+      const active = await login(RESTAURANT_SERVER, branch.trim(), username.trim(), password, workspace)
       await saveSession(active)
-      setPassword(''); setSession(active); setPending(await getPending(scopeOf(active)))
-      setPendingPrint(await getPendingPrint(scopeOf(active)))
-      setPendingSave(await getPendingSave(scopeOf(active)))
-      setPage('tables'); setTableId(''); setActionTarget(null)
+      setPassword(''); setSession(active)
+      if (workspace === 'dining') {
+        setPending(await getPending(scopeOf(active)))
+        setPendingPrint(await getPendingPrint(scopeOf(active)))
+        setPendingSave(await getPendingSave(scopeOf(active)))
+      }
+      resetPages(); setTableId(''); setActionTarget(null)
       await refresh(active)
     } catch (cause) { setError(describe(cause)) }
     finally { setBusy(false) }
@@ -96,6 +254,7 @@ export default function App() {
       await draftWrites.current
       replaceLines(await getDraft(scopeOf(session), id)); setTableId(id)
       setOpenedOrderId(menu?.tables.find(table => table.id === id)?.orderId ?? null)
+      setShowTableMessage(false); setShowTransfer(false)
       setPage('order'); setError(''); setNotice('')
     }
     catch (cause) { setError(describe(cause)) }
@@ -133,7 +292,12 @@ export default function App() {
     if (!session || pending || pendingPrint || printBusy || pendingSave || saveBusy) return
     setBusy(true)
     try { await logout(session) } catch { /* Local sign-out clears the saved phone credential. */ }
-    await clearSession(); setSession(null); setMenu(null); setConnected(false); setTableId(''); replaceLines([]); setPage('tables'); setFloor('Ground Floor'); setBusy(false)
+    await clearSession(); setSession(null); setMenu(null); setKitchenQueue(null); setConnected(false); setTableId(''); replaceLines([]); resetPages(); setFloor('Ground Floor'); setBusy(false)
+  }
+  async function acknowledge(noticeId: string) {
+    if (!session) return
+    try { await acknowledgeKitchenNotice(session, noticeId); await refresh(session) }
+    catch (cause) { setError(describe(cause)) }
   }
   async function sendPrint(input: PrintInput) {
     if (!session || printing.current) return
@@ -178,6 +342,23 @@ export default function App() {
       ])
     } catch (cause) { setError(describe(cause)) }
   }
+  async function moveTable(destinationId: string) {
+    if (!session || !existing || !tableId || !connected || changed || pending || pendingSave || busy || saveBusy || transferBusy) return
+    setTransferBusy(true); setError('')
+    try {
+      await draftWrites.current
+      if ((await getDraft(scopeOf(session), tableId)).length) throw new Error('Send or remove unsent items before transferring this table.')
+      const destination = menu?.tables.find(item => item.id === destinationId)
+      if (!destination || destination.orderId) throw new Error('Choose an available table.')
+      if ((await getDraft(scopeOf(session), destinationId)).length) throw new Error('The destination table has an unsent draft. Send or remove it before transferring this order.')
+      const saved = await transferTable(session, { orderId: existing.id, fromTableId: tableId, toTableId: destinationId })
+      setTableId(destinationId); setOpenedOrderId(saved.id); replaceLines([])
+      setShowTableMessage(false); setShowTransfer(false)
+      setNotice(`Order moved to Table ${destination.name}.`)
+      await refresh(session)
+    } catch (cause) { setError(describe(cause)); await refresh(session) }
+    finally { setTransferBusy(false) }
+  }
   function print(kind: 'bill' | 'kot') {
     if (!actionOrder || pendingPrint || printBusy || (kind === 'kot' && !selectedTicket)) return
     const input: PrintInput = { requestId: Crypto.randomUUID(), orderId: actionOrder.id, kind, ...(kind === 'kot' ? { ticketId: selectedTicket, copy: true } : {}) }
@@ -203,26 +384,57 @@ export default function App() {
   return <SafeAreaView style={[styles.shell, Platform.OS === 'android' && { paddingTop: NativeStatusBar.currentHeight ?? 0 }]}><StatusBar style="dark" />
     <View style={styles.header}><View><Text style={styles.brand}>BillMitra</Text><Text style={styles.muted}>{session?.branch.name ?? 'Waiter application'}{session ? ` · ${session.staff.displayName}` : ''}</Text></View>{session && <Text style={connected ? styles.green : styles.muted}>{connected ? 'Connected' : 'Offline'}</Text>}</View>
     {!!(error || connectionError) && <Text accessibilityRole="alert" style={styles.error}>{error || connectionError}</Text>}
+    {session && !connected && <View style={styles.connectionRecovery}>
+      <Text style={styles.bold}>Restaurant connection unavailable</Text>
+      <Text style={styles.muted}>Check this phone's connection. If the problem continues, ask your manager to check the restaurant server. Saved work is kept.</Text>
+      <Action title="Retry connection" onPress={() => void refresh(session)} />
+    </View>}
     {!!notice && <Text style={styles.notice}>{notice}</Text>}
-    {!session ? <ScrollView contentContainerStyle={styles.content}><Text style={styles.title}>Staff sign in</Text><Text style={styles.muted}>Ask your manager for the secure restaurant address and waiter account.</Text>
-      <Text style={styles.label}>HTTPS restaurant address</Text><TextInput style={styles.input} autoCapitalize="none" autoCorrect={false} keyboardType="url" value={server} onChangeText={setServer} placeholder="https://restaurant.example.com" />
+    {!session ? <ScrollView contentContainerStyle={styles.content}><Text style={styles.title}>Staff sign in</Text><Text style={styles.muted}>Choose where you work, then sign in with your restaurant account.</Text>
+      <Text style={styles.label}>Workspace</Text><View style={styles.floorTabs}>
+        <Pressable accessibilityRole="button" accessibilityState={{ selected: workspace === 'dining' }} onPress={() => setWorkspace('dining')} style={[styles.floorTab, workspace === 'dining' && styles.floorSelected]}><Text style={workspace === 'dining' ? styles.primaryText : styles.buttonText}>Dining</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityState={{ selected: workspace === 'kitchen' }} onPress={() => setWorkspace('kitchen')} style={[styles.floorTab, workspace === 'kitchen' && styles.floorSelected]}><Text style={workspace === 'kitchen' ? styles.primaryText : styles.buttonText}>Kitchen</Text></Pressable>
+      </View>
       <Text style={styles.label}>Branch ID</Text><TextInput style={styles.input} autoCapitalize="none" value={branch} onChangeText={setBranch} />
       <Text style={styles.label}>Username</Text><TextInput style={styles.input} autoCapitalize="none" value={username} onChangeText={setUsername} />
       <Text style={styles.label}>Password</Text><TextInput style={styles.input} secureTextEntry value={password} onChangeText={setPassword} />
-      <Action title={busy ? 'Signing in…' : 'Sign in'} onPress={() => void signIn()} disabled={busy || !server || !username || !password} primary /></ScrollView>
-      : <><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <Action title={busy ? 'Signing in…' : 'Sign in'} onPress={() => void signIn()} disabled={busy || !username || !password} primary /></ScrollView>
+      : session.workspace === 'kitchen' ? <KitchenScreen session={session} queue={kitchenQueue} onQueue={setKitchenQueue} onSignOut={() => void signOut()} alertSound={alertSound} onAlertSoundChange={setAlertSound} onPreviewSound={() => void playAlertSound()} onNotification={notifyStaff} messageOpenSignal={messageOpenSignal} />
+      : <><ScrollView ref={diningScroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {!(page === 'order' && showTableMessage) && <View style={{ display: page === 'messages' ? 'flex' : 'none' }}><VoicePanel session={session} onNotification={notifyStaff} openConversationSignal={messageOpenSignal} visible={page === 'messages'} onUnreadCountChange={setStaffUnreadCount} /></View>}
+        {page === 'notifications' && <><Text style={styles.title}>Kitchen notifications</Text>
+          {!menu?.notices?.length && <Text style={styles.muted}>No new kitchen notifications.</Text>}
+          {menu?.notices?.map(item => <View key={item.id} style={styles.pending}><Text style={styles.bold}>{item.kind === 'delay' ? `Table ${item.tableName ?? 'unknown'}: ${item.delayMinutes} minute delay` : `${item.productName ?? 'Item'} ${item.available ? 'available again' : 'unavailable'}`}</Text>
+          {!!item.reason && <Text>{item.reason}</Text>}<Text style={styles.muted}>Kitchen · {item.actor}</Text>
+          <Action title="Acknowledge" onPress={() => void acknowledge(item.id)} /></View>)}</>}
+        {menu?.waiting?.alerts.map(item => <View key={item.id} style={waitingStyles.waitingAlert}>
+          <Text accessibilityRole="alert" style={waitingStyles.waitingTitle}>Customer waiting · {item.tableName}</Text>
+          <Text>Seated for {Math.max(5, Math.floor((now - item.seatedAt) / 60_000))} minutes without an order. Please attend to this table.</Text>
+          <View style={waitingStyles.waitingActions}><Action title="Open table" onPress={() => void openTable(item.tableId)} />
+            {item.acknowledgedAt == null && <Action title="Acknowledge" onPress={() => void acknowledgeWaiting(item.id)} />}</View>
+        </View>)}
         {pendingSave && <View style={styles.pending}><Text style={styles.bold}>Unconfirmed saved bill</Text><Text>Retry confirms this same bill. It will not save another table order.</Text><Action title={saveBusy ? 'Checking…' : 'Retry saving bill'} disabled={saveBusy || busy || !!pending} onPress={() => void sendSave(pendingSave)} /></View>}
         {pendingPrint && <View style={styles.pending}><Text style={styles.bold}>Unconfirmed print request</Text><Text>Retry checks the same request without printing it twice.</Text><Action title={printBusy ? 'Checking…' : 'Retry print request'} disabled={printBusy} onPress={() => void sendPrint(pendingPrint)} /></View>}
         {pending && <View style={styles.pending}><Text style={styles.bold}>Pending kitchen confirmation</Text><Text>Retry the exact saved order for table {menu?.tables.find(item => item.id === pending.tableId)?.name ?? pending.tableId}. Editing is paused until confirmed.</Text><Action title={busy ? 'Checking…' : 'Retry pending order'} onPress={() => void submit()} disabled={busy} /></View>}
         {page === 'tables' && <><Text style={styles.title}>Tables</Text><Text style={styles.muted}>Tap to view the order. Hold a table for 2 seconds for Print Bill, Duplicate KOT and Save.</Text>
           <View style={styles.floorTabs}>{floors.map(item => <Pressable key={item} accessibilityRole="tab" accessibilityState={{ selected: item === selectedFloor }} onPress={() => setFloor(item)} style={[styles.floorTab, item === selectedFloor && styles.floorSelected]}><Text style={[styles.buttonText, item === selectedFloor && styles.primaryText]}>{item}</Text><Text style={[styles.floorCount, item === selectedFloor && styles.primaryText]}>{menu?.tables.filter(table => table.floor === item).length} tables</Text></Pressable>)}</View>
-          <View style={styles.grid}>{visibleTables.map(item => { const timer = orderTimer(item.startedAt ?? menu?.activeOrders.find(order => order.id === item.orderId)?.createdAt, now); return <Pressable key={item.id} accessibilityRole="button" accessibilityHint="Tap for current order. Hold for two seconds for table actions." accessibilityLabel={`Table ${item.name}, ${item.orderId ? `open ${timer.label}${timer.overdue ? ', over one hour' : ''}` : 'available'}`} style={[styles.table, !!item.orderId && (timer.overdue ? styles.tableLate : styles.tableOpen)]} delayLongPress={TABLE_HOLD_MS} onLongPress={() => { setActionTarget({ tableId: item.id, orderId: item.orderId }); setTicketId(''); setError('') }} onPress={() => void openTable(item.id)}><Text style={[styles.tableName, !!item.orderId && styles.occupiedText]}>{item.name}</Text><Text style={item.orderId ? styles.occupiedText : styles.muted}>{item.floor}</Text><Text style={item.orderId ? styles.occupiedText : styles.green}>{item.orderId ? 'Open order' : 'Available'}</Text>{item.orderId && <><Text style={styles.timer}>{timer.label}</Text>{timer.overdue && <Text style={styles.occupiedText}>Over 1 hour</Text>}</>}</Pressable> })}</View>{!menu && <Action title="Refresh tables" onPress={() => void refresh(session)} />}</>}
+          <View style={styles.grid}>{visibleTables.map(item => { const timer = orderTimer(item.startedAt ?? menu?.activeOrders.find(order => order.id === item.orderId)?.createdAt, now); const waiting = menu?.waiting?.alerts.some(alert => alert.tableId === item.id); const seated = menu?.waiting?.seatedTableIds.includes(item.id); return <Pressable key={item.id} accessibilityRole="button" accessibilityHint="Tap for current order. Hold for two seconds for table actions." accessibilityLabel={`Table ${item.name}, ${item.orderId ? `open ${timer.label}${timer.overdue ? ', over one hour' : ''}` : waiting ? 'customer waiting' : seated ? 'seated, awaiting order' : 'available'}`} style={[styles.table, !!item.orderId && (timer.overdue ? styles.tableLate : styles.tableOpen), waiting && waitingStyles.waitingTable]} delayLongPress={TABLE_HOLD_MS} onLongPress={() => { setActionTarget({ tableId: item.id, orderId: item.orderId }); setTicketId(''); setError('') }} onPress={() => void openTable(item.id)}><Text style={[styles.tableName, !!item.orderId && styles.occupiedText]}>{item.name}</Text><Text style={item.orderId ? styles.occupiedText : styles.muted}>{item.floor}</Text><Text style={item.orderId ? styles.occupiedText : waiting ? waitingStyles.waitingTitle : styles.green}>{item.orderId ? 'Open order' : waiting ? 'Waiting over 5 min' : seated ? 'Seated · no order' : 'Available'}</Text>{item.orderId && <><Text style={styles.timer}>{timer.label}</Text>{timer.overdue && <Text style={styles.occupiedText}>Over 1 hour</Text>}</>}</Pressable> })}</View>{!menu && <Action title="Refresh tables" onPress={() => void refresh(session)} />}
+          {(session.staff.role === 'owner' || session.staff.role === 'manager') && <View style={waitingStyles.simulationPanel}><Text style={styles.bold}>Seating simulation · manager test</Text><Text style={styles.muted}>Camera monitoring is not connected yet. Confirm a seated customer to test the five-minute alert.</Text>
+            {visibleTables.filter(item => !item.orderId).map(item => { const seated = menu?.waiting?.seatedTableIds.includes(item.id); return <Action key={item.id} title={`${item.name}: ${seated ? 'Confirm left' : 'Confirm seated'}`} onPress={() => void confirmSeat(item.id, !seated)} /> })}</View>}
+        </>}
         {page === 'order' && <><Action title="← Tables" onPress={() => setPage('tables')} /><Text style={styles.title}>Table {table?.name} · Current order</Text><Text style={styles.muted}>{table?.floor}</Text>
           {changed ? <Text style={styles.error}>This table changed. Return to Tables and open it again. Your unsent draft is kept.</Text> : existing ? <View style={styles.printPanel}><Text style={styles.bold}>Order #{existing.orderNumber} · {orderTimer(existing.createdAt, now).label}</Text>
             {existing.items.map(line => <View key={line.id} style={styles.row}><View style={styles.flex}><Text style={styles.bold}>{line.quantity} × {line.productName}</Text>{!!line.note && <Text style={styles.muted}>{line.note}</Text>}</View><Text style={styles.bold}>{money(line.quantity * line.unitPricePaise)}</Text></View>)}
             <Text style={styles.bold}>Bill total: {money(existing.totalPaise)}</Text><Text style={styles.muted}>Saved items sent to the kitchen.</Text></View> : <Text style={styles.muted}>No order yet. Add items to start this table.</Text>}
           {!!itemCount && <Text style={styles.notice}>{itemCount} unsent items in your draft.</Text>}
           <Action title={itemCount ? `Add items / Continue draft (${itemCount})` : 'Add items'} primary disabled={changed || !!pending || !!pendingSave || busy || saveBusy} onPress={() => { setCategory(''); setQuery(''); setPage('menu') }} />
+          <Action title={showTableMessage ? 'Hide kitchen message' : 'Message kitchen about this table'} disabled={!existing || changed} onPress={() => { setShowTableMessage(!showTableMessage); setShowTransfer(false) }} />
+          {showTableMessage && existing && table && <VoicePanel session={session} onNotification={notifyStaff} tableContext={{ tableId, tableName: table.name }} />}
+          <Action title={showTransfer ? 'Hide table transfer' : 'Transfer order to another table'} disabled={!existing || changed || !!pending || !!pendingSave || busy || saveBusy || transferBusy || !!itemCount || !connected} onPress={() => { setShowTransfer(!showTransfer); setShowTableMessage(false) }} />
+          {showTransfer && existing && <View style={styles.printPanel}><Text style={styles.bold}>Select an available table</Text><Text style={styles.muted}>The current order and its kitchen tickets will move together.</Text>
+            {menu?.tables.filter(item => item.id !== tableId && !item.orderId).map(item => <Action key={item.id} title={`${item.floor} · Table ${item.name}`} disabled={transferBusy} onPress={() => Alert.alert('Transfer table?', `Move order #${existing.orderNumber} to Table ${item.name}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Transfer', onPress: () => void moveTable(item.id) }])} />)}
+            {!menu?.tables.some(item => item.id !== tableId && !item.orderId) && <Text style={styles.muted}>No other table is available.</Text>}
+          </View>}
         </>}
         {page === 'menu' && <><Action title="← Current order" onPress={() => setPage('order')} /><Text style={styles.title}>{table?.name ?? 'Table'} · Add items</Text><TextInput style={styles.input} value={query} onChangeText={setQuery} placeholder="Search food" />
           {changed && <Text style={styles.error}>This table changed. Return to Tables and open it again before sending.</Text>}
@@ -237,8 +449,8 @@ export default function App() {
         {page === 'review' && <><Action title="← Menu" onPress={() => setPage('menu')} /><Text style={styles.title}>Review · {table?.name}</Text>{existing && <Text style={styles.muted}>Already sent: {existing.items.map(line => `${line.quantity} ${line.productName}`).join(', ')}</Text>}
           {lines.map((line,index) => <View key={`${line.productId}-${index}`} style={styles.orderLine}><Text style={styles.bold}>{menu?.products.find(product => product.id === line.productId)?.name}</Text><View style={styles.stepper}><Action title="−" onPress={() => void changeLines(lines.flatMap((item,i) => i !== index ? [item] : item.quantity > 1 ? [{...item,quantity:item.quantity-1}] : []))} disabled={!!pending || !!pendingSave || changed || busy || saveBusy} /><Text>{line.quantity}</Text><Action title="+" onPress={() => void changeLines(lines.map((item,i) => i === index ? {...item,quantity:Math.min(99,item.quantity+1)} : item))} disabled={!!pending || !!pendingSave || changed || busy || saveBusy} /></View><TextInput style={styles.input} value={line.note} onChangeText={note => void changeLines(lines.map((item,i) => i === index ? {...item,note:note.slice(0,200)} : item))} placeholder="Kitchen note" editable={!pending && !pendingSave && !changed && !busy && !saveBusy} /></View>)}
           <Text style={styles.bold}>Estimated item subtotal: {money(total)}</Text><Text style={styles.muted}>The server checks final prices and availability.</Text><Action title={busy ? 'Sending…' : 'Done · Send new items'} onPress={() => void submit()} disabled={busy || !itemCount || !!pendingSave || saveBusy || (!pending && changed) || (!!pending && pending.tableId !== tableId)} primary /></>}
-        {page === 'account' && <><Text style={styles.title}>Account</Text><Text>{session.staff.displayName} · {session.staff.role}</Text><Text style={styles.muted}>{session.branch.name}</Text><Action title="Refresh restaurant data" onPress={() => void refresh(session)} /><Action title="Sign out" onPress={() => void signOut()} disabled={!!pending || !!pendingPrint || printBusy || busy || !!pendingSave || saveBusy} />{(pending || pendingPrint || pendingSave) && <Text style={styles.muted}>Resolve pending requests before signing out.</Text>}</>}
-      </ScrollView><View style={styles.nav}><Action title="Tables" onPress={() => setPage('tables')} /><Action title="Account" onPress={() => setPage('account')} /></View></>}
+        {page === 'account' && <><Text style={styles.title}>Account</Text><Text>{session.staff.displayName} · {session.staff.role}</Text><Text style={styles.muted}>{session.branch.name}</Text><NotificationSettings sound={alertSound} onChange={setAlertSound} onPreview={() => void playAlertSound()} /><Action title={waitingSoundEnabled ? 'Mute waiting chime' : 'Unmute waiting chime'} onPress={() => setWaitingSoundEnabled(!waitingSoundEnabled)} /><Action title="Refresh restaurant data" onPress={() => void refresh(session)} /><Action title="Sign out" onPress={() => void signOut()} disabled={!!pending || !!pendingPrint || printBusy || busy || !!pendingSave || saveBusy} />{(pending || pendingPrint || pendingSave) && <Text style={styles.muted}>Resolve pending requests before signing out.</Text>}</>}
+      </ScrollView><View style={styles.nav}><Action title="Tables" onPress={() => { setPage('tables'); diningScroll.current?.scrollTo({ y: 0, animated: false }) }} /><Action title={`Kitchen (${menu?.notices?.length ?? 0})`} onPress={() => { setPage('notifications'); diningScroll.current?.scrollTo({ y: 0, animated: false }) }} /><Action title={`Messages${staffUnreadCount ? ` (${staffUnreadCount})` : ''}`} onPress={() => { setPage('messages'); diningScroll.current?.scrollTo({ y: 0, animated: false }) }} /><Action title="Account" onPress={() => { setPage('account'); diningScroll.current?.scrollTo({ y: 0, animated: false }) }} /></View></>}
     <Modal visible={!!session && !!actionTarget} transparent animationType="slide" onRequestClose={() => { if (!saveBusy && !printBusy) setActionTarget(null) }}>
       <View style={styles.modalBackdrop}><View style={styles.actionSheet}><ScrollView contentContainerStyle={styles.sheetContent}>
         <Text style={styles.title}>Table {actionTable?.name} · Actions</Text><Text style={styles.muted}>{actionTable?.floor}</Text>
@@ -260,23 +472,30 @@ export default function App() {
 function Action({title,onPress,disabled,primary}: {title:string;onPress:()=>void;disabled?:boolean;primary?:boolean}) {
   return <Pressable accessibilityRole="button" accessibilityState={{disabled:!!disabled}} onPress={onPress} disabled={disabled} style={[styles.button,primary && styles.primary,disabled && styles.disabled]}><Text style={[styles.buttonText,primary && styles.primaryText]}>{title}</Text></Pressable>
 }
+const waitingStyles = StyleSheet.create({
+  waitingAlert: { backgroundColor: '#fff1ef', borderColor: '#b4342f', borderWidth: 2, borderRadius: 12, padding: 16, marginBottom: 12 },
+  waitingTitle: { color: '#a52c28', fontWeight: '700', fontSize: 18 },
+  waitingActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  waitingTable: { borderColor: '#b4342f', borderWidth: 2, backgroundColor: '#fff1ef' },
+  simulationPanel: { marginTop: 24, borderTopWidth: 1, borderColor: '#ead9d7', paddingTop: 16 },
+})
 const floorAndQuantityStyles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
-  actionSheet: { maxHeight: '85%', borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: '#f4f8f5', paddingBottom: 20 },
+  actionSheet: { maxHeight: '85%', borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: '#fff9f8', paddingBottom: 20 },
   sheetContent: { padding: 20, gap: 8 },
-  tableOpen: { backgroundColor: '#1461a5', borderColor: '#0d518e' },
+  tableOpen: { backgroundColor: '#b95650', borderColor: '#a4433e' },
   tableLate: { backgroundColor: '#b63832', borderColor: '#972923' },
   occupiedText: { color: '#fff', marginTop: 4 },
   timer: { color: '#fff', fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'], marginTop: 10 },
-  printPanel: { borderWidth: 1, borderColor: '#bcd0c2', backgroundColor: '#fff', borderRadius: 12, padding: 14, marginTop: 14, gap: 8 },
-  batch: { borderWidth: 1, borderColor: '#cbdacf', borderRadius: 10, padding: 12, marginRight: 8, minHeight: 44, justifyContent: 'center' },
+  printPanel: { borderWidth: 1, borderColor: '#e5c9c6', backgroundColor: '#fff', borderRadius: 12, padding: 14, marginTop: 14, gap: 8 },
+  batch: { borderWidth: 1, borderColor: '#e5c9c6', borderRadius: 10, padding: 12, marginRight: 8, minHeight: 44, justifyContent: 'center' },
   floorTabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 18 },
-  floorTab: { flexGrow: 1, minWidth: 130, minHeight: 64, justifyContent: 'center', alignItems: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#cbdacf', backgroundColor: '#fff', padding: 12 },
-  floorSelected: { backgroundColor: '#246b49', borderColor: '#246b49' },
-  floorCount: { color: '#64736a', fontSize: 12, marginTop: 4 },
-  quantityControl: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#cbdacf', borderRadius: 12, backgroundColor: '#fff' },
+  floorTab: { flexGrow: 1, minWidth: 130, minHeight: 64, justifyContent: 'center', alignItems: 'center', borderRadius: 12, borderWidth: 1, borderColor: '#e5c9c6', backgroundColor: '#fff', padding: 12 },
+  floorSelected: { backgroundColor: '#b4342f', borderColor: '#b4342f' },
+  floorCount: { color: '#756b69', fontSize: 12, marginTop: 4 },
+  quantityControl: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e5c9c6', borderRadius: 12, backgroundColor: '#fff' },
   quantityButton: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  quantitySymbol: { color: '#245f40', fontWeight: '700', fontSize: 24 },
-  quantityValue: { minWidth: 28, textAlign: 'center', fontSize: 18, fontWeight: '700', color: '#203c2c' },
+  quantitySymbol: { color: '#a52c28', fontWeight: '700', fontSize: 24 },
+  quantityValue: { minWidth: 28, textAlign: 'center', fontSize: 18, fontWeight: '700', color: '#302525' },
 })
-const styles=StyleSheet.create({...floorAndQuantityStyles,shell:{flex:1,backgroundColor:'#f4f8f5'},header:{padding:18,backgroundColor:'#fff',flexDirection:'row',justifyContent:'space-between',alignItems:'center'},brand:{fontSize:24,fontWeight:'700',color:'#205c3d'},muted:{color:'#64736a',marginTop:4},title:{fontSize:24,fontWeight:'700',color:'#203c2c',marginVertical:14},content:{padding:18,paddingBottom:50},label:{marginTop:16,marginBottom:6,fontWeight:'600',color:'#355141'},input:{borderWidth:1,borderColor:'#cbdacf',borderRadius:10,backgroundColor:'#fff',minHeight:48,padding:12,fontSize:16,color:'#203c2c'},button:{borderWidth:1,borderColor:'#cbdacf',borderRadius:10,backgroundColor:'#fff',minHeight:48,justifyContent:'center',alignItems:'center',paddingHorizontal:14,marginVertical:4},buttonText:{color:'#245f40',fontWeight:'600'},primary:{backgroundColor:'#246b49',borderColor:'#246b49',marginTop:18},primaryText:{color:'#fff'},disabled:{opacity:0.5},error:{color:'#9b3028',backgroundColor:'#fff2ef',padding:12},notice:{color:'#22603f',backgroundColor:'#eaf7ed',padding:12},pending:{backgroundColor:'#fff2da',padding:14,borderRadius:12,marginBottom:12},grid:{flexDirection:'row',flexWrap:'wrap',gap:12,marginTop:16},table:{width:'47%',minHeight:118,padding:16,borderRadius:12,backgroundColor:'#fff',borderWidth:1,borderColor:'#dce6de'},tableName:{fontSize:22,fontWeight:'700',color:'#203c2c'},green:{color:'#246b49',marginTop:8},categories:{marginVertical:12},row:{flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderColor:'#e0e8e2',paddingVertical:12,gap:10},flex:{flex:1},bold:{fontWeight:'700',color:'#203c2c'},orderLine:{padding:14,backgroundColor:'#fff',borderRadius:12,marginVertical:7},stepper:{flexDirection:'row',alignItems:'center',gap:12},nav:{flexDirection:'row',justifyContent:'space-around',padding:8,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#dce6de'}})
+const styles=StyleSheet.create({...floorAndQuantityStyles,shell:{flex:1,backgroundColor:'#fff9f8'},header:{padding:18,backgroundColor:'#fff',flexDirection:'row',justifyContent:'space-between',alignItems:'center'},brand:{fontSize:24,fontWeight:'700',color:'#a52c28'},muted:{color:'#756b69',marginTop:4},title:{fontSize:24,fontWeight:'700',color:'#302525',marginVertical:14},content:{padding:18,paddingBottom:50},connectionRecovery:{padding:16,backgroundColor:'#fff8e9',gap:8},label:{marginTop:16,marginBottom:6,fontWeight:'600',color:'#5e4543'},input:{borderWidth:1,borderColor:'#e5c9c6',borderRadius:10,backgroundColor:'#fff',minHeight:48,padding:12,fontSize:16,color:'#302525'},button:{borderWidth:1,borderColor:'#e5c9c6',borderRadius:10,backgroundColor:'#fff',minHeight:48,justifyContent:'center',alignItems:'center',paddingHorizontal:14,marginVertical:4},buttonText:{color:'#a52c28',fontWeight:'600'},primary:{backgroundColor:'#b4342f',borderColor:'#b4342f',marginTop:18},primaryText:{color:'#fff'},disabled:{opacity:0.5},error:{color:'#9b3028',backgroundColor:'#fff2ef',padding:12},notice:{color:'#a52c28',backgroundColor:'#fff1ef',padding:12},pending:{backgroundColor:'#fff2da',padding:14,borderRadius:12,marginBottom:12},grid:{flexDirection:'row',flexWrap:'wrap',gap:12,marginTop:16},table:{width:'47%',minHeight:118,padding:16,borderRadius:12,backgroundColor:'#fff',borderWidth:1,borderColor:'#ead9d7'},tableName:{fontSize:22,fontWeight:'700',color:'#302525'},green:{color:'#b4342f',marginTop:8},categories:{marginVertical:12},row:{flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderColor:'#ead9d7',paddingVertical:12,gap:10},flex:{flex:1},bold:{fontWeight:'700',color:'#302525'},orderLine:{padding:14,backgroundColor:'#fff',borderRadius:12,marginVertical:7},stepper:{flexDirection:'row',alignItems:'center',gap:12},nav:{flexDirection:'row',justifyContent:'space-around',padding:8,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#ead9d7'}})

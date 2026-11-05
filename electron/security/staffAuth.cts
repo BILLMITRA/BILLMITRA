@@ -11,6 +11,7 @@ import type {
   StaffRole,
 } from '../../shared/domain.js'
 import { STAFF_ROLES } from '../../shared/domain.js'
+import { STAFF_PASSWORD_MAX_LENGTH, STAFF_PASSWORD_MIN_LENGTH } from '../../shared/staffPermissions.js'
 import { createPasswordHash, verifyPasswordHash } from '../../shared/staffSecurity.js'
 import { staffHasPermission } from '../../shared/staffPermissions.js'
 
@@ -18,7 +19,7 @@ type TransactionRunner = <T>(action: () => T) => T
 
 const usernameSchema = z.string().trim().toLowerCase()
   .regex(/^[a-z0-9._-]{3,40}$/, 'Username must be 3 to 40 letters, digits, dots, underscores, or hyphens.')
-const passwordSchema = z.string().min(12).max(128)
+const passwordSchema = z.string().min(STAFF_PASSWORD_MIN_LENGTH).max(STAFF_PASSWORD_MAX_LENGTH)
 const staffLoginSchema = z.object({
   username: usernameSchema,
   password: z.string().min(1).max(128),
@@ -184,6 +185,22 @@ export class StaffAuthService {
       throw cause
     }
     return staff
+  }
+
+  resetManagerPassword(senderId: number, rawInput: unknown): void {
+    const actor = this.requirePermission(senderId, 'staff:manage')
+    if (actor.role !== 'owner') throw new Error('Only the owner can reset a manager password.')
+    const input = z.object({ staffId: z.string().uuid(), password: passwordSchema }).strict().parse(rawInput)
+    const manager = this.database.prepare('SELECT id, username FROM staff_users WHERE id = ? AND role = ? AND active = 1')
+      .get(input.staffId, 'manager') as { id: string; username: string } | undefined
+    if (!manager) throw new Error('Select an active manager account.')
+    const credential = createPasswordHash(input.password)
+    this.transaction(() => {
+      this.database.prepare('UPDATE staff_users SET password_salt = ?, password_hash = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?')
+        .run(credential.salt, credential.hash, manager.id)
+      this.audit('staff.password_reset', manager.id, actor.username, 'owner_reset_manager_password', { username: manager.username })
+    })
+    for (const [id, session] of this.sessions) if (session.id === manager.id) this.sessions.delete(id)
   }
 
   private identityFromRow(row: { id: string; username: string; displayName: string; role: string }): StaffIdentity {

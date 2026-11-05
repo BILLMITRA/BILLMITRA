@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ShieldCheck, UserPlus, X } from 'lucide-react'
 import { STAFF_ROLES, type CreateStaffInput, type StaffIdentity, type StaffRole } from '../../../shared/domain'
-import { createStaff, listStaff } from '../../services/pos'
+import { STAFF_PASSWORD_MIN_LENGTH } from '../../../shared/staffPermissions'
+import { createStaff, getStaffAccessState, listStaff, resetManagerPassword } from '../../services/pos'
 import './staff.css'
 
 type StaffManagementDialogProps = {
@@ -27,6 +28,11 @@ export function StaffManagementDialog({ onClose }: StaffManagementDialogProps) {
   const [displayName, setDisplayName] = useState('')
   const [role, setRole] = useState<Exclude<StaffRole, 'owner'>>('cashier')
   const [password, setPassword] = useState('')
+  const [isOwner, setIsOwner] = useState(false)
+  const [resetId, setResetId] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [notice, setNotice] = useState('')
 
   async function refreshStaff(): Promise<void> {
     setLoading(true)
@@ -42,6 +48,7 @@ export function StaffManagementDialog({ onClose }: StaffManagementDialogProps) {
 
   useEffect(() => {
     let mounted = true
+    void getStaffAccessState().then((access) => { if (mounted) setIsOwner(access.staff?.role === 'owner') })
     listStaff()
       .then((accounts) => { if (mounted) setStaffList(accounts) })
       .catch((cause: unknown) => {
@@ -51,8 +58,23 @@ export function StaffManagementDialog({ onClose }: StaffManagementDialogProps) {
     return () => { mounted = false }
   }, [])
 
+  async function submitReset(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    if (newPassword !== confirmPassword) { setError('The new passwords do not match.'); return }
+    setSaving(true); setError(''); setNotice('')
+    try {
+      await resetManagerPassword({ staffId: resetId, password: newPassword })
+      setResetId(''); setNewPassword(''); setConfirmPassword('')
+      setNotice('Manager password reset. Ask the manager to sign in with the new password.')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Manager password could not be reset.') }
+    finally { setSaving(false) }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
+    if (!/^[a-z0-9._-]{3,40}$/.test(username)) {
+      setError('Username must be 3 to 40 characters with no spaces. Try 2ndscreen.'); return
+    }
     setSaving(true)
     setError('')
     try {
@@ -89,23 +111,30 @@ export function StaffManagementDialog({ onClose }: StaffManagementDialogProps) {
                     <span className="staff-list-avatar">{staff.displayName.slice(0, 1).toUpperCase()}</span>
                     <span className="staff-list-copy"><b>{staff.displayName}</b><small>@{staff.username}</small></span>
                     <span className={`staff-role-badge ${staff.role}`}>{staff.role}</span>
+                    {isOwner && staff.role === 'manager' && <button type="button" className="staff-reset-button" onClick={() => { setResetId(staff.id); setError(''); setNotice('') }}>Reset password</button>}
                   </li>
                 ))}
               </ul>
             )}
+            {resetId && <form className="staff-reset-form" onSubmit={(event) => void submitReset(event)}>
+              <h3>Reset {staffList.find(staff => staff.id === resetId)?.displayName}'s password</h3>
+              <label><span>New password</span><input type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} minLength={STAFF_PASSWORD_MIN_LENGTH} maxLength={128} autoComplete="new-password" required /></label>
+              <label><span>Confirm new password</span><input type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} minLength={STAFF_PASSWORD_MIN_LENGTH} maxLength={128} autoComplete="new-password" required /></label>
+              <div><button type="submit" disabled={saving}>Save new password</button><button type="button" onClick={() => { setResetId(''); setNewPassword(''); setConfirmPassword('') }} disabled={saving}>Cancel</button></div>
+            </form>}
+            {notice && <p role="status" className="staff-access-hint">{notice}</p>}
           </section>
           <form className="staff-create-form" onSubmit={(event) => void submit(event)}>
             <h3><UserPlus size={16} /> Add staff account</h3>
             <label><span>Display name</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={120} autoComplete="name" required /></label>
-            <label><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} minLength={3} maxLength={40} pattern="[a-zA-Z0-9._-]{3,40}" autoCapitalize="none" autoComplete="off" required /></label>
+            <label><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} minLength={3} maxLength={40} pattern="[a-zA-Z0-9._-]{3,40}" title="Use letters, numbers, dots, underscores or hyphens, with no spaces" autoCapitalize="none" autoComplete="off" required /></label>
             <label><span>Role</span>
               <select value={role} onChange={(event) => setRole(event.target.value as Exclude<StaffRole, 'owner'>)}>
                 {availableRoles.map((availableRole) => <option value={availableRole} key={availableRole}>{availableRole}</option>)}
               </select>
             </label>
             <small className="staff-role-description">{roleDescriptions[role]}</small>
-            <label><span>Temporary password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} maxLength={128} autoComplete="new-password" required /></label>
-            <small className="staff-access-hint">At least 12 characters. Give this password to the staff member securely.</small>
+            <label><span>Temporary password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={STAFF_PASSWORD_MIN_LENGTH} maxLength={128} placeholder="4 or more letters or digits" autoComplete="new-password" required /></label>
             {error && <div className="staff-access-error" role="alert">{error}</div>}
             <button type="submit" disabled={saving || loading}>{saving ? 'Creating…' : 'Create staff account'}</button>
           </form>

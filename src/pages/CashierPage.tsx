@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Armchair, ArrowDownRight, ArrowLeft, ArrowUpRight, CalendarClock, Check, ChevronDown, Coffee, GitMerge,
   Ban, CopyPlus, CreditCard, Flame, History, Minus, Plus, Printer, Search, ShieldCheck, ShoppingBag,
-  Soup, Sparkles, Trash2, Truck, Users, UtensilsCrossed, Wallet, LogOut,
+  Soup, Sparkles, Trash2, Truck, Users, UtensilsCrossed, Wallet, LogOut, Keyboard,
 } from 'lucide-react'
 import type {
   BillHistoryEntry,
@@ -15,33 +15,43 @@ import type {
   RecordPaymentInput,
   RestaurantTable,
   SavedOrder,
+  DeliveryCustomerRecord,
   StaffAccessState,
   StaffIdentity,
 } from '../../shared/domain'
+import type { CashSummary } from '../../shared/restaurant'
 import { DELIVERY_SLOT_COUNT, PARCEL_SLOT_COUNT, formatOrderReference } from '../../shared/domain'
 import { staffHasPermission } from '../../shared/staffPermissions'
 import { RestaurantTableCard } from '../components/RestaurantTableCard'
 import { calculateTotals, formatMoney, InvoicePreview, JoinBillDialog, RecallBillDialog, SplitBillDialog, parseDiscountInput, type DiscountMode } from '../features/billing'
 import { BillHistoryDialog } from '../features/payments'
 import { SavedBillsDialog } from '../features/payments/SavedBillsDialog'
-import { createOrder, getOrder, getStaffAccessState, joinOrders, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, recordDuplicateKotRequest, recordPayment, setManagerPin, splitOrder, updateDeliverySchedule, voidOrder, voidOrderItem } from '../services/pos'
+import { assignDeliveryRiderBatch, authorizeManagement, cashOutDelivery, createOrder, getCashSummary, getOrder, getPaymentLedger, getStaffAccessState, joinOrders, listBillHistory, loadMenu, logoutStaff, managerPinConfigured, openCash, recordDuplicateKotRequest, recordPayment, resetManagerPin, setManagerPin, splitOrder, updateDeliverySchedule, voidOrder, voidOrderItem } from '../services/pos'
 import { ManagerActionDialog } from '../features/security/ManagerActionDialog'
+import { ManagementPinDialog } from '../features/security/ManagementPinDialog'
 import { ItemVoidDialog } from '../features/security/ItemVoidDialog'
 import { KitchenTicketPreview } from '../features/kitchen/KitchenTicketPreview'
 import { DeliveryActionDialog } from '../features/delivery/DeliveryActionDialog'
-import { DeliveryCustomerDialog } from '../features/delivery/DeliveryCustomerDialog'
+import { DeliveryCashOutDialog } from '../features/delivery/DeliveryCashOutDialog'
+import { DeliveryCustomerDialog, type DeliveryCustomerDetails } from '../features/delivery/DeliveryCustomerDialog'
+import { ParcelCustomerDialog } from '../features/delivery/ParcelCustomerDialog'
 import { StaffAccessScreen } from '../features/staff/StaffAccessScreen'
 import { StaffManagementDialog } from '../features/staff/StaffManagementDialog'
 import { DesktopPrinters } from '../features/printing/DesktopPrinters'
 import { TablePrintDialog } from '../features/printing/TablePrintDialog'
 import '../features/printing/printing.css'
 import { RestaurantManagement } from '../features/management/RestaurantManagement'
+import { CashOpeningDialog } from '../features/management/CashOpeningDialog'
 import { PaymentLedgerDialog } from '../features/management/PaymentLedgerDialog'
 import { WaiterScreen } from '../features/management/WaiterScreen'
 import { DeliveryScheduleScreen } from '../features/delivery/DeliveryScheduleScreen'
 import type { CartLine } from '../types/cart'
 import { elapsedClockLabel, tableOrderTimer } from '../utils/tablePresentation'
 import '../styles/cashier.css'
+import billmitraLogo from '../assets/billmitra-red-symbol.svg'
+import { OrderShortcutsDialog } from '../features/shortcuts/OrderShortcutsDialog'
+import { loadOrderShortcuts, shortcutFromEvent } from '../features/shortcuts/orderShortcuts'
+import { cardShortcutFromEvent, loadCardShortcuts } from '../features/shortcuts/cardShortcuts'
 
 type ServiceSection = 'tables' | 'parcel' | 'delivery'
 type ManagerDialogMode = 'setup' | 'void'
@@ -54,7 +64,22 @@ const categoryIcons: Record<string, typeof Soup> = {
   desserts: Sparkles,
 }
 
+function deliveryCashOutBlockReason(order: SavedOrder): string | null {
+  if (order.deliveryStatus === 'failed') return 'This delivery failed. Reassign it in Delivery schedule before taking payment.'
+  if (order.deliveryStatus === 'cancelled') return 'This delivery was cancelled and cannot be cashed out. Review it in Delivery schedule.'
+  return null
+}
+
 function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName?: string; onChangeBranch?: () => void } = {}) {
+  const branchControlMode = new URLSearchParams(window.location.search).get('mode') === 'branch-control'
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try { return window.localStorage.getItem('billmitra-appearance') === 'dark' ? 'dark' : 'light' } catch { return 'light' }
+  })
+  useEffect(() => {
+    document.documentElement.classList.toggle('billmitra-dark-mode', theme === 'dark')
+    try { window.localStorage.setItem('billmitra-appearance', theme) } catch { /* Appearance still applies for this session. */ }
+    return () => document.documentElement.classList.remove('billmitra-dark-mode')
+  }, [theme])
   const [staffAccess, setStaffAccess] = useState<StaffAccessState | null>(null)
   const [menu, setMenu] = useState<MenuData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -73,9 +98,13 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
   const [activeOrder, setActiveOrder] = useState<SavedOrder | null>(null)
   const [previewOrder, setPreviewOrder] = useState<SavedOrder | null>(null)
+  const [cashSummary, setCashSummary] = useState<CashSummary | null>(null)
+  const [deliveryCashOut, setDeliveryCashOut] = useState<{ order: SavedOrder; balancePaise: number; requestId: string } | null>(null)
   const [lastPayment, setLastPayment] = useState<PaymentRecord | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash')
   const [paymentSubmitting, setPaymentSubmitting] = useState(false)
+  const [cashChecking, setCashChecking] = useState(false)
+  const cashActionInProgress = useRef(false)
   const [failedPayment, setFailedPayment] = useState<RecordPaymentInput | null>(null)
   const [billHistory, setBillHistory] = useState<BillHistoryEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -85,9 +114,13 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const closeSavedBills = useCallback(() => setShowSavedBills(false), [])
   const [showStaffManagement, setShowStaffManagement] = useState(false)
   const [showManagement, setShowManagement] = useState(false)
+  const [showManagementPin, setShowManagementPin] = useState(false)
+  const [managementSetupRequested, setManagementSetupRequested] = useState(false)
   const [showPaymentLedger, setShowPaymentLedger] = useState(false)
   const [showWaiter, setShowWaiter] = useState(false)
   const [showDeliverySchedule, setShowDeliverySchedule] = useState(false)
+  const [deliveryBoardAssignment, setDeliveryBoardAssignment] = useState<{ riderId: string; riderName: string; orderIds: string[] } | null>(null)
+  const [deliveryBoardAssignmentBusy, setDeliveryBoardAssignmentBusy] = useState(false)
   const [hasManagerPin, setHasManagerPin] = useState(false)
   const [managerDialogMode, setManagerDialogMode] = useState<ManagerDialogMode | null>(null)
   const [showItemVoid, setShowItemVoid] = useState(false)
@@ -96,8 +129,17 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [showRecallBill, setShowRecallBill] = useState(false)
   const [categoryId, setCategoryId] = useState('all')
   const [search, setSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchSelection, setSearchSelection] = useState(0)
+  const [showKitchenMessage, setShowKitchenMessage] = useState(false)
+  const [kitchenMessage, setKitchenMessage] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchResultsRef = useRef<HTMLDivElement>(null)
   const [cart, setCart] = useState<CartLine[]>([])
+  const [selectedDraftProductId, setSelectedDraftProductId] = useState<string | null>(null)
+  const [orderShortcuts, setOrderShortcuts] = useState(loadOrderShortcuts)
+  const [cardShortcuts, setCardShortcuts] = useState(loadCardShortcuts)
+  const [showOrderShortcuts, setShowOrderShortcuts] = useState(false)
   const [discountMode, setDiscountMode] = useState<DiscountMode>('none')
   const [discountInput, setDiscountInput] = useState('0')
   const [showInvoice, setShowInvoice] = useState(false)
@@ -106,6 +148,9 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const closeTablePrint = useCallback(() => setTablePrint(null), [])
   const [kitchenTicketDuplicate, setKitchenTicketDuplicate] = useState(false)
   const [showDeliveryCustomerDialog, setShowDeliveryCustomerDialog] = useState(false)
+  const [showParcelCustomerDialog, setShowParcelCustomerDialog] = useState(false)
+  const [deliveryCustomerStaged, setDeliveryCustomerStaged] = useState(false)
+  const [deliveryWhatsappOptIn, setDeliveryWhatsappOptIn] = useState(false)
   const [customerName, setCustomerName] = useState('')
   const [contactNumber, setContactNumber] = useState('')
   const [deliveryAddress, setDeliveryAddress] = useState('')
@@ -118,6 +163,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const [clock, setClock] = useState(() => new Date())
   const [liveError, setLiveError] = useState('')
   const [deliveryTimerNow, setDeliveryTimerNow] = useState(() => Date.now())
+  const [deliveryCardSearch, setDeliveryCardSearch] = useState('')
+  const [parcelCardSearch, setParcelCardSearch] = useState('')
   const staff = staffAccess?.staff ?? null
   const connected = !window.pos || window.pos.connectionMode === 'connected'
   const canApplyDiscount = Boolean(staff && staffHasPermission(staff.role, 'discount:apply'))
@@ -176,6 +223,23 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   }, [staff])
 
   useEffect(() => {
+    if (!staff || !staffHasPermission(staff.role, 'payments:record')) return
+    let active = true
+    const refresh = () => { void getCashSummary().then(summary => {
+      if (active) setCashSummary(summary)
+    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to check the cash drawer.') }) }
+    refresh()
+    const timer = window.setInterval(refresh, 15_000)
+    return () => { active = false; window.clearInterval(timer); setCashSummary(null) }
+  }, [staff])
+
+  async function handleOpenCash(requestId: string, openingPaise: number): Promise<void> {
+    await openCash({ requestId, openingPaise })
+    setCashSummary(await getCashSummary())
+    setSavedMessage(`Cash drawer opened with ${formatMoney(openingPaise)}.`)
+  }
+
+  useEffect(() => {
     if (!connected || !staff || !staffHasPermission(staff.role, 'pos:access')) return
     let active = true
     let inFlight = false
@@ -187,6 +251,16 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
         if (active) { setMenu(data); setLiveError('') }
       } catch (cause) {
         if (active) setLiveError(cause instanceof Error ? cause.message : 'Restaurant connection lost.')
+        if (active && cause instanceof Error && cause.message.includes('Sign in with a staff account')) {
+          try {
+            const access = await getStaffAccessState()
+            if (active && !access.staff) {
+              setStaffAccess(access)
+              setMenu(null)
+              setLiveError('')
+            }
+          } catch { /* Keep the current screen until the server responds. */ }
+        }
       } finally { inFlight = false }
     }
     const timer = window.setInterval(() => void refresh(), 5000)
@@ -195,28 +269,24 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   }, [connected, staff])
 
   useEffect(() => {
-    const handleShortcut = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        searchInputRef.current?.focus()
-      } else if (event.key === 'Escape' && document.activeElement === searchInputRef.current) {
-        setSearch('')
-        searchInputRef.current?.blur()
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && document.activeElement === searchInputRef.current) {
+        setSearch(''); setSearchOpen(false); searchInputRef.current?.blur()
       }
     }
-    window.addEventListener('keydown', handleShortcut)
-    return () => window.removeEventListener('keydown', handleShortcut)
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
   }, [])
 
   useEffect(() => {
     if (!staff) return
-    if ((serviceSection !== 'delivery' || deliveryOrderOpen) && (serviceSection !== 'tables' || tableViewOpen)) return
+    if ((serviceSection !== 'delivery' || deliveryOrderOpen) && (serviceSection !== 'tables' || tableViewOpen) && (serviceSection !== 'parcel' || parcelOrderOpen)) return
     const tick = () => setDeliveryTimerNow(Date.now())
     const timer = window.setInterval(tick, 1000)
     window.addEventListener('focus', tick)
     document.addEventListener('visibilitychange', tick)
     return () => { window.clearInterval(timer); window.removeEventListener('focus', tick); document.removeEventListener('visibilitychange', tick) }
-  }, [deliveryOrderOpen, serviceSection, tableViewOpen, staff])
+  }, [deliveryOrderOpen, parcelOrderOpen, serviceSection, tableViewOpen, staff])
 
   const floors = useMemo(() => [...new Set(menu?.tables.map((table) => table.floor) ?? [])], [menu])
   const visibleProducts = useMemo(() => {
@@ -227,17 +297,25 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   }, [categoryId, menu])
   const searchResults = useMemo(() => {
     const query = search.trim().toLocaleLowerCase()
-    if (!query) return []
+    if (!query) return visibleProducts.slice(0, 7)
     return (menu?.products ?? [])
       .filter((product) => product.available
         && `${product.name} ${product.description} ${product.categoryId}`.toLocaleLowerCase().includes(query))
       .slice(0, 7)
-  }, [menu, search])
+  }, [menu, search, visibleProducts])
+  useEffect(() => {
+    if (!searchOpen) return
+    setSearchSelection(current => Math.min(current, Math.max(0, searchResults.length - 1)))
+  }, [searchOpen, searchResults.length])
+  useEffect(() => {
+    if (!searchOpen) return
+    searchResultsRef.current?.querySelectorAll<HTMLElement>('[role="option"]')[searchSelection]?.scrollIntoView({ block: 'nearest' })
+  }, [searchOpen, searchSelection])
   const visibleTables = (menu?.tables ?? []).filter((table) => floor === 'All tables' || table.floor === floor)
   const selectedTableOrders = useMemo(() => selectedTable
     ? (menu?.activeOrders ?? []).filter((order) => order.type === 'dine_in' && order.tableId === selectedTable && !order.savedAt)
     : [], [menu, selectedTable])
-  const joinCandidates = useMemo(() => (menu?.activeOrders ?? []).filter(order => order.type === 'dine_in' && !order.savedAt && order.id !== activeOrder?.id), [menu, activeOrder?.id])
+  const joinableBills = useMemo(() => (menu?.activeOrders ?? []).filter(order => order.type === 'dine_in' && !order.savedAt && order.status !== 'paid' && order.status !== 'voided' && order.status !== 'joined'), [menu])
   const recallableBills = useMemo(() => (menu?.activeOrders ?? []).filter(order => !order.savedAt), [menu])
   const savedBills = (menu?.activeOrders ?? []).filter(order => Boolean(order.savedAt))
   const printTargetForOrder = (order: SavedOrder): RestaurantTable => {
@@ -263,7 +341,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   }
   const printableTable = activeOrder ? printTargetForOrder(activeOrder) : null
   const activeDeliveryOrders = (menu?.activeOrders ?? []).filter((order) => order.type === 'delivery')
-  const deliverySlots = Array.from({ length: DELIVERY_SLOT_COUNT }, (_, index) => {
+  const deliverySlots = Array.from({ length: menu?.cardSettings?.deliveryCount ?? DELIVERY_SLOT_COUNT }, (_, index) => {
     const deliveryNumber = index + 1
     return {
       deliveryNumber,
@@ -271,8 +349,21 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     }
   })
   const occupiedDeliverySlots = activeDeliveryOrders.filter((order) => order.deliveryNumber !== null).length
+  const visibleDeliverySlots = useMemo(() => {
+    const query = deliveryCardSearch.trim().toLocaleLowerCase()
+    if (!query) return deliverySlots
+    return deliverySlots.filter(({ deliveryNumber, order }) => Boolean(order && [
+      `hd-${deliveryNumber}`,
+      String(deliveryNumber),
+      order.customerName,
+      order.contactNumber,
+      order.deliveryArea,
+      order.deliveryLandmark,
+      order.deliveryAddress,
+    ].join(' ').toLocaleLowerCase().includes(query)))
+  }, [deliveryCardSearch, deliverySlots])
   const activeParcelOrders = (menu?.activeOrders ?? []).filter((order) => order.type === 'parcel')
-  const parcelSlots = Array.from({ length: PARCEL_SLOT_COUNT }, (_, index) => {
+  const parcelSlots = Array.from({ length: menu?.cardSettings?.parcelCount ?? PARCEL_SLOT_COUNT }, (_, index) => {
     const parcelNumber = index + 1
     return {
       parcelNumber,
@@ -280,6 +371,17 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     }
   })
   const occupiedParcelSlots = activeParcelOrders.filter((order) => order.parcelNumber !== null).length
+  const visibleParcelSlots = useMemo(() => {
+    const query = parcelCardSearch.trim().toLocaleLowerCase()
+    if (!query) return parcelSlots
+    return parcelSlots.filter(({ parcelNumber, order }) => Boolean(order && [
+      `p-${parcelNumber}`,
+      String(parcelNumber),
+      order.customerName,
+      order.contactNumber,
+      order.deliveryArea,
+    ].join(' ').toLocaleLowerCase().includes(query)))
+  }, [parcelCardSearch, parcelSlots])
   const existingLines = activeOrder?.items ?? []
   const invoiceLines = [
     ...existingLines.map((item) => ({
@@ -302,6 +404,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const totalPaise = invoiceTotals.totalPaise
   const discountChanged = activeOrder !== null
     && JSON.stringify(parsedDiscount.discount) !== JSON.stringify(activeOrder.discount)
+  const kitchenMessageChanged = activeOrder !== null && kitchenMessage.trim() !== (activeOrder.kitchenMessage ?? '')
   const deliveryDetailsChanged = activeOrder?.type === 'delivery'
     && (customerName.trim() !== activeOrder.customerName
       || contactNumber.trim() !== activeOrder.contactNumber
@@ -328,22 +431,35 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   const canSaveInvoice = !submitting && !failedSubmission && !parsedDiscount.error
     && !activeOrder?.savedAt
     && activeOrder?.status !== 'paid' && activeOrder?.status !== 'voided'
-    && (cart.length > 0 || discountChanged || deliveryDetailsChanged)
+    && (cart.length > 0 || discountChanged || deliveryDetailsChanged || deliveryCustomerStaged || kitchenMessageChanged)
     && (!discountChanged || canApplyDiscount)
     && (orderType !== 'dine_in' || Boolean(selectedTable))
-    && (orderType !== 'parcel' || Boolean(customerName.trim() && selectedParcelNumber !== null))
+    && (orderType !== 'parcel' || selectedParcelNumber !== null)
     && (orderType !== 'delivery' || selectedDeliveryNumber !== null)
   const canClearDraft = !submitting && !failedSubmission && activeOrder?.status !== 'paid' && activeOrder?.status !== 'voided'
-    && (cart.length > 0 || discountChanged || deliveryDetailsChanged || (!activeOrder && Boolean(customerName.trim() || contactNumber.trim() || deliveryAddress.trim() || scheduledDeliveryAt || assignedDeliveryTo)))
+    && (cart.length > 0 || discountChanged || deliveryDetailsChanged || kitchenMessageChanged || (!activeOrder && Boolean(kitchenMessage.trim() || customerName.trim() || contactNumber.trim() || deliveryAddress.trim() || scheduledDeliveryAt || assignedDeliveryTo)))
   const canVoidBill = Boolean(activeOrder && activeOrder.status !== 'paid' && activeOrder.status !== 'voided'
     && canVoidBills && hasManagerPin && cart.length === 0 && !discountChanged && !deliveryDetailsChanged && !submitting && !failedSubmission)
   const canVoidItem = Boolean(canVoidBill && activeOrder && activeOrder.items.length > 0)
   const canSplitBill = Boolean(activeOrder && activeOrder.type === 'dine_in' && !activeOrder.savedAt
     && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && activeOrder.items.reduce((total, item) => total + item.quantity, 0) > 1
     && cart.length === 0 && !discountChanged && !submitting && !failedSubmission)
-  const canJoinBill = Boolean(activeOrder && activeOrder.type === 'dine_in' && !activeOrder.savedAt && joinCandidates.length
-    && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && cart.length === 0 && !discountChanged && !submitting && !failedSubmission)
+  const canJoinBill = Boolean(staff && staffHasPermission(staff.role, 'orders:write') && cart.length === 0 && !discountChanged && !deliveryDetailsChanged && !kitchenMessageChanged && !submitting && !failedSubmission
+    && (!(tableViewOpen || deliveryOrderOpen || parcelOrderOpen) || (tableViewOpen && activeOrder?.type === 'dine_in' && !activeOrder.savedAt)))
+  const canCashClose = Boolean(activeOrder && (activeOrder.type === 'dine_in' || activeOrder.type === 'parcel')
+    && activeOrder.status !== 'paid' && activeOrder.status !== 'voided'
+    && staff && staffHasPermission(staff.role, 'payments:record')
+    && cart.length === 0 && !discountChanged && !submitting && !failedSubmission
+    && !paymentSubmitting && !cashChecking
+    && (!failedPayment || (failedPayment.orderId === activeOrder.id && failedPayment.method === 'cash')))
   const orderEditorOpen = tableViewOpen || deliveryOrderOpen || parcelOrderOpen
+  useEffect(() => {
+    if (!orderEditorOpen || previewOrder || showDeliveryCustomerDialog || showParcelCustomerDialog
+      || activeOrder?.savedAt || activeOrder?.status === 'paid' || activeOrder?.status === 'voided') return
+    const frame = window.requestAnimationFrame(() => searchInputRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [orderEditorOpen, selectedTable, selectedDeliveryNumber, selectedParcelNumber,
+    previewOrder, showDeliveryCustomerDialog, showParcelCustomerDialog, activeOrder?.savedAt, activeOrder?.status])
   const itemCount = existingLines.reduce((count, item) => count + item.quantity, 0)
     + cart.reduce((count, item) => count + item.quantity, 0)
 
@@ -360,10 +476,14 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setAssignedDeliveryTo('')
     setShowDeliveryScheduleDialog(false)
     setShowDeliveryCustomerDialog(false)
+    setDeliveryCustomerStaged(false)
+    setDeliveryWhatsappOptIn(false)
     setPreviewOrder(null)
     setActiveOrder(null)
     setLastPayment(null)
     setCart([])
+    setKitchenMessage('')
+    setShowKitchenMessage(false)
     setDiscountMode('none')
     setDiscountInput('0')
     setFailedSubmission(null)
@@ -376,6 +496,10 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
 
   function chooseTable(table: RestaurantTable, edit = false): void {
     if (failedSubmission || submitting) return
+    setSearch('')
+    setSearchOpen(false)
+    setSearchSelection(0)
+    setDeliveryCustomerStaged(false)
     const order = (menu?.activeOrders ?? []).find((candidate) => candidate.id === table.orderId)
       ?? (menu?.activeOrders ?? []).find((candidate) => candidate.type === 'dine_in' && candidate.tableId === table.id)
       ?? null
@@ -395,6 +519,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setSavedMessage('')
     setPreviewOrder(order && !edit ? order : null)
     setActiveOrder(order)
+    setKitchenMessage(order?.kitchenMessage ?? '')
+    setShowKitchenMessage(false)
     setLastPayment(null)
     if (order?.discount?.kind === 'percentage') {
       setDiscountMode('percentage')
@@ -413,6 +539,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     if (failedSubmission || submitting) return
     if (cart.length > 0 && !window.confirm('Discard unsaved items and open this bill?')) return
     setActiveOrder(order)
+    setKitchenMessage(order.kitchenMessage ?? '')
+    setShowKitchenMessage(false)
     setCart([])
     setLastPayment(null)
     setError('')
@@ -457,6 +585,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     if (!selectedTable || failedSubmission || submitting) return
     if ((cart.length > 0 || activeOrder) && !window.confirm('Start a separate new bill for this table? Unsaved items on the current screen will be cleared.')) return
     setActiveOrder(null)
+    setKitchenMessage('')
+    setShowKitchenMessage(false)
     setCart([])
     setLastPayment(null)
     setDiscountMode('none')
@@ -467,6 +597,10 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
 
   function chooseDeliverySlot(deliveryNumber: number, edit = false): void {
     if (failedSubmission || submitting) return
+    setSearch('')
+    setSearchOpen(false)
+    setSearchSelection(0)
+    setDeliveryWhatsappOptIn(false)
     const order = activeDeliveryOrders.find((candidate) => candidate.deliveryNumber === deliveryNumber) ?? null
     setServiceSection('delivery')
     setOrderType('delivery')
@@ -479,6 +613,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setScheduledDeliveryAt(order?.scheduledDeliveryAt ?? null)
     setAssignedDeliveryTo(order?.assignedDeliveryTo ?? '')
     setActiveOrder(order)
+    setKitchenMessage(order?.kitchenMessage ?? '')
+    setShowKitchenMessage(false)
     setLastPayment(null)
     setCart([])
     setCustomerName(order?.customerName ?? '')
@@ -501,10 +637,15 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       setDiscountInput('0')
     }
     setShowDeliveryCustomerDialog(Boolean((!edit || !order) && order && (!order.contactNumber || !order.deliveryAddress)))
+    setDeliveryCustomerStaged(false)
   }
 
   function chooseParcelSlot(parcelNumber: number, edit = false): void {
     if (failedSubmission || submitting) return
+    setSearch('')
+    setSearchOpen(false)
+    setSearchSelection(0)
+    setDeliveryCustomerStaged(false)
     const order = activeParcelOrders.find((candidate) => candidate.parcelNumber === parcelNumber) ?? null
     setServiceSection('parcel')
     setOrderType('parcel')
@@ -517,12 +658,14 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setScheduledDeliveryAt(null)
     setAssignedDeliveryTo('')
     setActiveOrder(order)
+    setKitchenMessage(order?.kitchenMessage ?? '')
+    setShowKitchenMessage(false)
     setLastPayment(null)
     setCart([])
     setCustomerName(order?.customerName ?? '')
     setContactNumber(order?.contactNumber ?? '')
     setDeliveryAddress('')
-    setDeliveryArea('')
+    setDeliveryArea(order?.deliveryArea ?? '')
     setDeliveryLandmark('')
     setDeliveryInstructions('')
     setError('')
@@ -547,15 +690,18 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       || deliveryArea.trim() !== (activeOrder?.deliveryArea ?? '')
       || deliveryLandmark.trim() !== (activeOrder?.deliveryLandmark ?? '')
       || deliveryInstructions.trim() !== (activeOrder?.deliveryInstructions ?? '')
-    if ((cart.length > 0 || discountChanged || changedGuestDetails) && !window.confirm(`Discard unsaved changes and return to ${serviceSection === 'delivery' ? 'delivery' : 'takeaway'} slots?`)) return
+    if ((cart.length > 0 || discountChanged || kitchenMessageChanged || changedGuestDetails) && !window.confirm(`Discard unsaved changes and return to ${serviceSection === 'delivery' ? 'delivery' : 'takeaway'} slots?`)) return
     setDeliveryOrderOpen(false)
     setParcelOrderOpen(false)
+    setDeliveryCustomerStaged(false)
     setPreviewOrder(null)
     setSelectedDeliveryNumber(null)
     setSelectedParcelNumber(null)
     setScheduledDeliveryAt(null)
     setAssignedDeliveryTo('')
     setActiveOrder(null)
+    setKitchenMessage('')
+    setShowKitchenMessage(false)
     setLastPayment(null)
     setCart([])
     setDiscountMode('none')
@@ -578,13 +724,16 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       if (found) return current.map((line) => line.product.id === product.id ? { ...line, quantity: line.quantity + 1 } : line)
       return [...current, { product, quantity: 1, note: '' }]
     })
+    setSelectedDraftProductId(product.id)
     setSavedMessage('')
   }
 
   function addSearchResult(product: Product): void {
     addProduct(product)
-    setSearch('')
     searchInputRef.current?.focus()
+    setSearch('')
+    setSearchOpen(false)
+    setSearchSelection(0)
   }
 
   function changeQuantity(productId: string, change: number): void {
@@ -594,6 +743,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       const quantity = line.quantity + change
       return quantity > 0 ? [{ ...line, quantity }] : []
     }))
+    setSelectedDraftProductId(productId)
     setSavedMessage('')
   }
 
@@ -606,6 +756,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   function clearDraft(): void {
     if (!canClearDraft || !window.confirm('Clear unsaved items and changes? Saved bill items will stay unchanged.')) return
     setCart([])
+    setKitchenMessage(activeOrder?.kitchenMessage ?? '')
+    setShowKitchenMessage(false)
     if (activeOrder?.discount?.kind === 'percentage') {
       setDiscountMode('percentage')
       setDiscountInput(String(activeOrder.discount.valueBps / 100))
@@ -648,7 +800,42 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     await setManagerPin(pin)
     setHasManagerPin(true)
     setManagerDialogMode(null)
-    setSavedMessage('Manager PIN set on this device. Voids will require it.')
+    if (managementSetupRequested) {
+      setManagementSetupRequested(false)
+      setShowManagement(true)
+    }
+    setSavedMessage('Manager PIN set. Management and voids will require it.')
+  }
+
+  async function openManagement(): Promise<void> {
+    setError('')
+    try {
+      const configured = await managerPinConfigured()
+      setHasManagerPin(configured)
+      if (!configured) {
+        if (!canManageSettings) throw new Error('Ask the owner to set a manager PIN before opening Management.')
+        setManagementSetupRequested(true)
+        setManagerDialogMode('setup')
+        return
+      }
+      setShowManagementPin(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Management access could not be checked.')
+    }
+  }
+
+  async function handleAuthorizeManagement(pin: string): Promise<void> {
+    await authorizeManagement(pin)
+    setShowManagementPin(false)
+    setShowManagement(true)
+  }
+
+  async function handleResetManagementPin(input: { ownerPassword: string; pin: string }): Promise<void> {
+    await resetManagerPin(input)
+    setHasManagerPin(true)
+    setShowManagementPin(false)
+    setShowManagement(true)
+    setSavedMessage('Manager PIN changed. Use the new PIN for Management and voids.')
   }
 
   async function handleVoidOrder(pin: string, reason: string): Promise<void> {
@@ -701,7 +888,15 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
 
   async function handleJoinBills(input: import('../../shared/domain').JoinOrdersInput): Promise<void> {
     const joined = await joinOrders(input)
-    setActiveOrder(joined)
+    chooseTableOrder(joined)
+    setSelectedTable(joined.tableId)
+    setServiceSection('tables')
+    setOrderType('dine_in')
+    setParcelOrderOpen(false)
+    setDeliveryOrderOpen(false)
+    const table = menu?.tables.find(item => item.id === joined.tableId)
+    if (table) setFloor(table.floor)
+    setPreviewOrder(tableViewOpen ? null : joined)
     setShowJoinBill(false)
     setLastPayment(null)
     setSavedMessage(`Combined bill #${joined.orderNumber} created.`)
@@ -729,6 +924,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     try {
       const order = await createOrder(input)
       setActiveOrder(order)
+      setKitchenMessage(order.kitchenMessage ?? '')
       setCart([])
       setFailedSubmission(null)
       setCustomerName(order.customerName)
@@ -743,7 +939,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       if (input.tableId) setSelectedTable(input.tableId)
       if (input.type !== 'dine_in') setServiceSection(input.type === 'parcel' ? 'parcel' : 'delivery')
       setSavedMessage(`Order ${formatOrderReference(order)} saved on this device`)
-      if (order.type === 'delivery' && (!order.contactNumber || !order.deliveryAddress)) {
+      if (order.type === 'delivery' && (!input.orderId || !order.contactNumber || !order.deliveryAddress)) {
         setShowDeliveryCustomerDialog(true)
       }
       if (input.tableId) {
@@ -782,14 +978,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     setSavedMessage('Delivery details will be saved when you submit this order.')
   }
 
-  async function completeDeliveryCustomerDetails(details: {
-    customerName: string
-    contactNumber: string
-    deliveryAddress: string
-    deliveryArea: string
-    deliveryLandmark: string
-    deliveryInstructions: string
-  }): Promise<void> {
+  async function persistDeliveryCustomerDetails(details: DeliveryCustomerDetails, finish: boolean): Promise<void> {
     if (!activeOrder || activeOrder.type !== 'delivery') {
       throw new Error('Save the delivery order before entering customer details.')
     }
@@ -803,17 +992,57 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       deliveryArea: details.deliveryArea,
       deliveryLandmark: details.deliveryLandmark,
       deliveryInstructions: details.deliveryInstructions,
+      kitchenMessage: activeOrder.kitchenMessage,
+      deferKitchenTicket: !finish,
+      prepareKitchenTicket: finish,
+      whatsappBillOptIn: Boolean(details.whatsappBillOptIn),
       deliveryNumber: activeOrder.deliveryNumber,
       parcelNumber: null,
-      scheduledDeliveryAt,
+      scheduledDeliveryAt: details.scheduledDeliveryAt,
       items: [],
       discount: activeOrder.discount,
       orderId: activeOrder.id,
     }, true)
     if (!saved) throw new Error('An order save is already in progress. Please wait and retry.')
+    if (details.scheduledDeliveryAt !== activeOrder.scheduledDeliveryAt) {
+      await updateDeliverySchedule({ orderId: activeOrder.id,
+        scheduledPickupAt: activeOrder.scheduledPickupAt, promisedDeliveryAt: details.scheduledDeliveryAt })
+      const refreshed = await getOrder(activeOrder.id)
+      if (refreshed) setActiveOrder(refreshed)
+    }
+    setScheduledDeliveryAt(details.scheduledDeliveryAt)
     setShowDeliveryCustomerDialog(false)
-    setKitchenTicketDuplicate(false)
-    setShowKitchenTicket(true)
+    setDeliveryCustomerStaged(!finish)
+    setDeliveryWhatsappOptIn(Boolean(details.whatsappBillOptIn))
+    if (finish) {
+      setDeliveryOrderOpen(false)
+      setKitchenTicketDuplicate(false)
+      setShowKitchenTicket(true)
+    } else {
+      setSavedMessage('Customer saved. Press Done on the order to finish and view the KOT.')
+    }
+  }
+
+  async function stageDeliveryCustomerDetails(details: DeliveryCustomerDetails): Promise<void> {
+    await persistDeliveryCustomerDetails(details, false)
+  }
+
+  async function completeDeliveryCustomerDetails(details: DeliveryCustomerDetails): Promise<void> {
+    await persistDeliveryCustomerDetails(details, true)
+  }
+
+  async function selectParcelCustomer(customer: DeliveryCustomerRecord): Promise<void> {
+    if (!activeOrder || activeOrder.type !== 'parcel') throw new Error('Open a parcel order first.')
+    const saved = await submitOrder({
+      requestId: crypto.randomUUID(), type: 'parcel', tableId: null, orderId: activeOrder.id,
+      parcelNumber: activeOrder.parcelNumber, deliveryNumber: null,
+      customerName: customer.customerName, contactNumber: customer.contactNumber,
+      deliveryAddress: '', deliveryArea: customer.deliveryArea || customer.deliveryAddress, items: [], discount: activeOrder.discount,
+    }, true)
+    if (!saved) throw new Error('Please wait for the order to finish saving and try again.')
+    setShowParcelCustomerDialog(false)
+    setParcelOrderOpen(false)
+    setPreviewOrder(null)
   }
 
   async function openBillHistory(): Promise<void> {
@@ -842,6 +1071,65 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The cashier view could not refresh delivery changes.')
+    }
+  }
+
+  function beginDeliveryBoardAssignment(rider: { id: string; name: string }): void {
+    setShowDeliverySchedule(false)
+    setDeliveryBoardAssignment({ riderId: rider.id, riderName: rider.name, orderIds: [] })
+    setDeliveryBoardAssignmentBusy(false)
+    setServiceSection('delivery')
+    setOrderType('delivery')
+    setDeliveryOrderOpen(false)
+    setSelectedDeliveryNumber(null)
+    setActiveOrder(null)
+    setPreviewOrder(null)
+    setError('')
+    void refreshMenu().catch(cause => setError(cause instanceof Error ? cause.message : 'Unable to refresh HD cards for assignment.'))
+  }
+
+  function toggleDeliveryBoardAssignment(order: SavedOrder): void {
+    if (!deliveryBoardAssignment || deliveryBoardAssignmentBusy) return
+    const selectable = order.type === 'delivery'
+      && order.deliveryStatus === 'pending'
+      && !order.deliveryRiderId
+      && ['ordering', 'preparing', 'ready'].includes(order.status)
+      && order.status !== 'voided'
+    if (!selectable) return
+    setDeliveryBoardAssignment(current => current ? {
+      ...current,
+      orderIds: current.orderIds.includes(order.id)
+        ? current.orderIds.filter(id => id !== order.id)
+        : [...current.orderIds, order.id],
+    } : null)
+  }
+
+  async function saveDeliveryBoardAssignment(): Promise<void> {
+    const assignment = deliveryBoardAssignment
+    if (!assignment || !assignment.orderIds.length || deliveryBoardAssignmentBusy) return
+    setDeliveryBoardAssignmentBusy(true)
+    setError('')
+    try {
+      await assignDeliveryRiderBatch({ orderIds: assignment.orderIds, riderId: assignment.riderId })
+      const printErrors: string[] = []
+      let printed = 0
+      if (window.desktopPrinting) {
+        for (const orderId of assignment.orderIds) {
+          try {
+            await window.desktopPrinting.request({ orderId, kind: 'bill' })
+            printed += 1
+          } catch { printErrors.push(orderId) }
+        }
+      }
+      await refreshMenu()
+      setDeliveryBoardAssignment(null)
+      setShowDeliverySchedule(true)
+      setSavedMessage(`${assignment.orderIds.length} HD bill${assignment.orderIds.length === 1 ? '' : 's'} assigned to ${assignment.riderName}.${window.desktopPrinting ? ` ${printed} bill print request${printed === 1 ? '' : 's'} queued.` : ' Open the desktop app to print the bills.'}`)
+      if (printErrors.length) setError(`${printErrors.length} assigned bill print request${printErrors.length === 1 ? '' : 's'} could not be queued. Check Desktop Printers and retry from the HD card.`)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The selected HD bills could not be assigned. Refresh and try again.')
+    } finally {
+      setDeliveryBoardAssignmentBusy(false)
     }
   }
 
@@ -902,7 +1190,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to open saved bill.') }
   }
 
-  async function settleBill(order: SavedOrder): Promise<void> {
+  async function settleBill(order: SavedOrder, method: PaymentMethod = paymentMethod): Promise<void> {
     if (order.status === 'paid' || order.status === 'voided' || paymentSubmitting) return
     if (failedPayment && failedPayment.orderId !== order.id) {
       setError('Resolve the previous payment attempt before paying a different bill.')
@@ -912,7 +1200,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     const input = failedPayment ?? {
       requestId: crypto.randomUUID(),
       orderId: order.id,
-      method: paymentMethod,
+      method,
     }
     setFailedPayment(input)
     setPaymentSubmitting(true)
@@ -924,12 +1212,11 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       const savedOrder = await getOrder(order.id)
       if (!savedOrder) throw new Error('The payment was recorded, but the bill could not be reloaded.')
       await refreshMenu()
-      const latestHistory = await listBillHistory()
-      setBillHistory(latestHistory)
-      setActiveOrder(savedOrder)
-      setLastPayment(payment)
       setFailedPayment(null)
+      setService(savedOrder.type === 'dine_in' ? 'tables' : savedOrder.type === 'parcel' ? 'parcel' : 'delivery')
       setSavedMessage(`Bill #${savedOrder.orderNumber} paid in full by ${payment.method.toUpperCase()}.`)
+      try { setBillHistory(await listBillHistory()) }
+      catch { setError('The bill is paid and its card is clear. Refresh Bill history to see the latest receipt.') }
     } catch (reason) {
       const detail = reason instanceof Error ? reason.message : 'Payment could not be confirmed.'
       setError(paymentSaved
@@ -938,6 +1225,57 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
     } finally {
       setPaymentSubmitting(false)
     }
+  }
+
+  async function takeCashAndClose(order: SavedOrder): Promise<void> {
+    if (!canCashClose || cashActionInProgress.current) return
+    cashActionInProgress.current = true
+    setCashChecking(true)
+    setError('')
+    try {
+      const latest = await getOrder(order.id)
+      if (!latest || latest.status === 'paid' || latest.status === 'voided' || latest.status === 'joined') {
+        await refreshMenu()
+        throw new Error('This bill is no longer open. Refresh the card before taking payment.')
+      }
+      const ledger = await getPaymentLedger(order.id)
+      if (ledger.settled || ledger.balancePaise <= 0) throw new Error('This bill has no cash balance due.')
+      const reference = latest.type === 'parcel' ? `P-${latest.parcelNumber}` : `table ${menu?.tables.find(table => table.id === latest.tableId)?.name ?? latest.tableId}`
+      if (!window.confirm(`Confirm ${formatMoney(ledger.balancePaise)} cash received for ${reference}, bill #${latest.orderNumber}?\nThis will mark the bill paid and clear its card.`)) return
+      await settleBill(latest, 'cash')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to check the cash balance. Try again.')
+    } finally {
+      cashActionInProgress.current = false
+      setCashChecking(false)
+    }
+  }
+
+  async function openDeliveryCashOut(order: SavedOrder): Promise<void> {
+    if (cashChecking || deliveryCashOut) return
+    setCashChecking(true)
+    setError('')
+    try {
+      const latest = await getOrder(order.id)
+      if (!latest || latest.type !== 'delivery' || latest.status === 'voided' || latest.status === 'joined')
+        throw new Error('This HD bill is no longer available. Refresh the delivery board.')
+      const blockedReason = deliveryCashOutBlockReason(latest)
+      if (blockedReason) throw new Error(blockedReason)
+      const ledger = await getPaymentLedger(order.id)
+      setDeliveryCashOut({ order: latest, balancePaise: ledger.balancePaise, requestId: crypto.randomUUID() })
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not check this HD bill.') }
+    finally { setCashChecking(false) }
+  }
+
+  async function confirmDeliveryCashOut(pin: string): Promise<void> {
+    if (!deliveryCashOut) return
+    const { order, balancePaise, requestId } = deliveryCashOut
+    const result = await cashOutDelivery({ requestId, orderId: order.id, pin, expectedBalancePaise: balancePaise })
+    setDeliveryCashOut(null)
+    setService('delivery')
+    setSavedMessage(`${formatOrderReference(order)} cash-out complete. ${result.collectedPaise > 0 ? `${formatMoney(result.collectedPaise)} cash recorded.` : 'Previously recorded payment retained.'}`)
+    try { await refreshMenu(); setBillHistory(await listBillHistory()) }
+    catch { setError('Cash-out completed. Refresh the delivery board to see the cleared HD card.') }
   }
 
   function acceptStaffLogin(authenticatedStaff: StaffIdentity): void {
@@ -959,6 +1297,8 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       setContactNumber('')
       setDeliveryAddress('')
       setShowManagement(false)
+      setShowManagementPin(false)
+      setManagementSetupRequested(false)
       setShowWaiter(false)
       setShowPaymentLedger(false)
       setShowStaffManagement(false)
@@ -988,10 +1328,28 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
 
   function startSubmit(): void {
     if (failedSubmission) {
-      void submitOrder(failedSubmission)
+      void submitOrder(failedSubmission).then(saved => {
+        if (saved && !(failedSubmission.type === 'delivery' && (!failedSubmission.orderId || !failedSubmission.contactNumber?.trim() || !failedSubmission.deliveryAddress?.trim()))) {
+          setTableViewOpen(false)
+          setParcelOrderOpen(false)
+          setDeliveryOrderOpen(false)
+        }
+        if (saved && deliveryCustomerStaged) {
+          setDeliveryCustomerStaged(false)
+          setKitchenTicketDuplicate(false)
+          setShowKitchenTicket(true)
+        }
+      })
       return
     }
-    if (cart.length === 0 && !discountChanged && !deliveryDetailsChanged) return
+    if (deliveryCustomerStaged && cart.length === 0 && !discountChanged && !deliveryDetailsChanged && !kitchenMessageChanged) {
+      void completeDeliveryCustomerDetails({ customerName, contactNumber, deliveryAddress,
+        deliveryArea, deliveryLandmark, deliveryInstructions, scheduledDeliveryAt,
+        whatsappBillOptIn: deliveryWhatsappOptIn }).catch(reason =>
+        setError(reason instanceof Error ? reason.message : 'The delivery order could not be completed.'))
+      return
+    }
+    if (cart.length === 0 && !discountChanged && !deliveryDetailsChanged && !kitchenMessageChanged) return
     const input: CreateOrderInput = {
       requestId: crypto.randomUUID(),
       type: orderType,
@@ -999,9 +1357,14 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       customerName: customerName.trim(),
       contactNumber: contactNumber.trim(),
       deliveryAddress: deliveryAddress.trim(),
-      deliveryArea: orderType === 'delivery' ? deliveryArea.trim() : '',
+      deliveryArea: orderType === 'delivery' || orderType === 'parcel' ? deliveryArea.trim() : '',
       deliveryLandmark: orderType === 'delivery' ? deliveryLandmark.trim() : '',
       deliveryInstructions: orderType === 'delivery' ? deliveryInstructions.trim() : '',
+      kitchenMessage: kitchenMessage.trim(),
+      deferKitchenTicket: orderType === 'delivery' && !deliveryCustomerStaged
+        && (!activeOrder || !contactNumber.trim() || !deliveryAddress.trim()),
+      prepareKitchenTicket: orderType === 'delivery' && deliveryCustomerStaged,
+      whatsappBillOptIn: orderType === 'delivery' && deliveryCustomerStaged && deliveryWhatsappOptIn,
       deliveryNumber: orderType === 'delivery' ? selectedDeliveryNumber : null,
       parcelNumber: orderType === 'parcel' ? selectedParcelNumber : null,
       scheduledDeliveryAt: orderType === 'delivery' ? scheduledDeliveryAt : null,
@@ -1014,8 +1377,96 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
       ...(activeOrder ? { orderId: activeOrder.id } : {}),
     }
     setFailedSubmission(input)
-    void submitOrder(input)
+    void submitOrder(input).then(saved => {
+      if (saved && !(input.type === 'delivery' && (!input.orderId || !input.contactNumber?.trim() || !input.deliveryAddress?.trim()))) {
+        setTableViewOpen(false)
+        setParcelOrderOpen(false)
+        setDeliveryOrderOpen(false)
+      }
+      if (saved && deliveryCustomerStaged) {
+        setDeliveryCustomerStaged(false)
+        setKitchenTicketDuplicate(false)
+        setShowKitchenTicket(true)
+      }
+    })
   }
+
+  useEffect(() => {
+    const handleOrderShortcut = (event: KeyboardEvent) => {
+      if (!orderEditorOpen || showOrderShortcuts || event.repeat || document.querySelector('[aria-modal="true"]')) return
+      const shortcut = shortcutFromEvent(event)
+      if (!shortcut) return
+      const action = Object.entries(orderShortcuts).find(([, key]) => key === shortcut)?.[0]
+      if (!action) return
+      const target = event.target as HTMLElement | null
+      const editing = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'))
+      if (editing && action !== 'search') return
+      event.preventDefault()
+      switch (action) {
+        case 'done':
+          if (canSaveInvoice || (failedSubmission && !submitting)) startSubmit()
+          break
+        case 'reduce': {
+          const line = cart.find(item => item.product.id === selectedDraftProductId) ?? cart.at(-1)
+          if (line) changeQuantity(line.product.id, -1)
+          break
+        }
+        case 'search': searchInputRef.current?.focus(); break
+        case 'discount': if (canApplyDiscount) document.getElementById('discount-mode')?.focus(); break
+        case 'printBill':
+          if (activeOrder && cart.length === 0 && activeOrder.status !== 'voided') {
+            if (window.desktopPrinting && printableTable) setTablePrint({ table: printableTable, kind: 'bill' })
+            else setShowInvoice(true)
+          }
+          break
+        case 'recall': if (recallableBills.length) setShowRecallBill(true); break
+        case 'voidItem': if (canVoidItem) setShowItemVoid(true); break
+      }
+    }
+    window.addEventListener('keydown', handleOrderShortcut)
+    return () => window.removeEventListener('keydown', handleOrderShortcut)
+  })
+
+  useEffect(() => {
+    const handleSlotShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!staff || !staffHasPermission(staff.role, 'pos:access') || orderEditorOpen || showManagement || showWaiter || showDeliverySchedule || deliveryBoardAssignment || event.repeat
+        || target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+        || document.querySelector('[aria-modal="true"], [role="dialog"]')) return
+      const shortcut = cardShortcutFromEvent(event)
+      const action = Object.entries(cardShortcuts).find(([, value]) => value === shortcut)?.[0]
+      if (!action) return
+      event.preventDefault()
+      if (action === 'parcel') {
+        const freeSlot = parcelSlots.find(slot => !slot.order)
+        if (freeSlot) chooseParcelSlot(freeSlot.parcelNumber)
+        else setError('All parcel cards are in use.')
+        return
+      }
+      if (action === 'delivery') {
+        const freeSlot = deliverySlots.find(slot => !slot.order)
+        if (freeSlot) chooseDeliverySlot(freeSlot.deliveryNumber)
+        else setError('All home delivery cards are in use.')
+        return
+      }
+      const wantedFloor = action === 'ground'
+        ? floors.find(name => name.toLocaleLowerCase().includes('ground'))
+        : floors.find(name => /^(floor\s*1|1st\s*floor)$/i.test(name.trim()))
+      if (!wantedFloor) {
+        setError(action === 'ground' ? 'Ground Floor was not found.' : 'Floor 1 was not found.')
+        return
+      }
+      const freeTable = menu?.tables.find(table => table.floor === wantedFloor && table.status === 'available')
+      if (freeTable) chooseTable(freeTable)
+      else {
+        setFloor(wantedFloor)
+        setServiceSection('tables')
+        setError(`No available tables on ${wantedFloor}.`)
+      }
+    }
+    window.addEventListener('keydown', handleSlotShortcut)
+    return () => window.removeEventListener('keydown', handleSlotShortcut)
+  })
 
   const selectedTableData = menu?.tables.find((table) => table.id === selectedTable)
   if (loading && !staffAccess) {
@@ -1027,9 +1478,13 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   if (staffAccess && !staffAccess.staff) {
     return <StaffAccessScreen needsOwnerSetup={staffAccess.needsOwnerSetup} onAuthenticated={acceptStaffLogin} />
   }
+  if (branchControlMode && staff) {
+    if (!staffHasPermission(staff.role, 'menu:manage')) return <main className="staff-no-module"><h1>Branch Control</h1><p>A manager or owner account is required.</p><button onClick={() => void handleStaffLogout()}>Sign out</button></main>
+    return <RestaurantManagement staff={staff} theme={theme} onThemeChange={setTheme} cardShortcuts={cardShortcuts} onCardShortcutsChange={setCardShortcuts} orderShortcuts={orderShortcuts} onOrderShortcutsChange={setOrderShortcuts} onClose={() => void handleStaffLogout()} />
+  }
   if (staff && !staffHasPermission(staff.role, 'pos:access')) {
     if (staff.role === 'waiter') return <WaiterScreen staff={staff} onClose={() => void handleStaffLogout()} />
-    if (staffHasPermission(staff.role, 'reports:view') || staffHasPermission(staff.role, 'inventory:manage') || staffHasPermission(staff.role, 'kitchen:operate')) return <RestaurantManagement staff={staff} onClose={() => void handleStaffLogout()} />
+    if (staffHasPermission(staff.role, 'reports:view') || staffHasPermission(staff.role, 'inventory:manage') || staffHasPermission(staff.role, 'kitchen:operate')) return <RestaurantManagement staff={staff} theme={theme} onThemeChange={setTheme} cardShortcuts={cardShortcuts} onCardShortcutsChange={setCardShortcuts} orderShortcuts={orderShortcuts} onOrderShortcutsChange={setOrderShortcuts} onClose={() => void handleStaffLogout()} />
     return (
       <main className="staff-no-module">
         <div className="brand-mark"><UtensilsCrossed size={22} /></div>
@@ -1047,11 +1502,11 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${theme === 'dark' ? 'dark-mode' : ''} ${orderEditorOpen ? 'order-entry-active' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark"><UtensilsCrossed size={20} strokeWidth={2.4} /></div>
-          <div><strong>BillMitra</strong><span>RESTAURANT POS</span></div>
+          <img className="brand-logo" src={billmitraLogo} alt="BillMitra" />
+          <div className="brand-copy"><strong>BillMitra</strong><span>RESTAURANT POS</span></div>
         </div>
         <button className="branch-select" disabled={!onChangeBranch} onClick={onChangeBranch}><span className="branch-dot" /><span><b>{branchName}</b><small>{onChangeBranch ? 'Switch branch' : 'Current restaurant'}</small></span><ChevronDown size={15} /></button>
         <div className="side-label">WORKSPACE</div>
@@ -1098,7 +1553,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             <button className="staff-management-button" onClick={() => setShowSavedBills(true)}>Saved Bills ({savedBills.length})</button>
             <DesktopPrinters />
             {staffHasPermission(staff.role, 'waiter:operate') && <button className="staff-management-button" onClick={() => setShowWaiter(true)}>Waiter</button>}
-            {(staffHasPermission(staff.role, 'menu:manage') || staffHasPermission(staff.role, 'reports:view')) && <button className="staff-management-button" onClick={() => setShowManagement(true)}>Management</button>}
+            {staffHasPermission(staff.role, 'menu:manage') && <button className="staff-management-button" onClick={() => void openManagement()}>Management</button>}
             {canManageStaff && <button className="staff-management-button" onClick={() => setShowStaffManagement(true)}><Users size={14} />Staff</button>}
             <div className="live-indicator" title={liveError || undefined}><span className={`online-dot${liveError ? ' offline' : ''}`} /> {connected ? liveError ? 'CONNECTION LOST' : 'CONNECTED · 5S REFRESH' : 'LOCAL MODE'}</div>
             <span className="top-divider" />
@@ -1110,20 +1565,29 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
         <div className={`workspace ${orderEditorOpen ? 'order-editor-open' : 'service-board-open'} ${previewOrder ? 'order-preview-open' : ''}`}>
           {previewOrder && <aside className="order-preview-panel" aria-label={`Preview bill ${previewOrder.orderNumber}`}>
             <header><div><span className="eyebrow">ORDER PREVIEW</span><h2>{formatOrderReference(previewOrder)} · Bill #{previewOrder.orderNumber}</h2><small>{previewOrder.type === 'dine_in' ? `Table ${selectedTableData?.name ?? previewOrder.tableId ?? '—'}` : previewOrder.type === 'delivery' ? previewOrder.customerName || 'Delivery customer pending' : previewOrder.customerName || 'Takeaway guest pending'}</small></div><button onClick={() => { setPreviewOrder(null); setActiveOrder(null) }}>Close</button></header>
-            <div className="preview-status"><span className={`status-dot ${previewOrder.status}`} />{previewOrder.status.replace('_', ' ')}</div>
+            <div className="preview-status"><span className={`status-dot ${previewOrder.status}`} />{previewOrder.type === 'delivery' && deliveryCashOutBlockReason(previewOrder) ? previewOrder.deliveryStatus : previewOrder.status.replace('_', ' ')}</div>
             <div className="preview-items">{previewOrder.items.map(item => <div key={item.id}><span><b>{item.productName}</b>{item.note && <small>{item.note}</small>}</span><span>{item.quantity} × {formatMoney(item.unitPricePaise)}<b>{formatMoney(item.quantity * item.unitPricePaise)}</b></span></div>)}</div>
             <div className="preview-total"><span>Total</span><b>{formatMoney(previewOrder.totalPaise)}</b></div>
             <p>Preview only. Use Recall to edit this bill.</p>
-            <button className="preview-recall" onClick={() => recallBill(previewOrder)}><Search size={16} />Recall & edit bill</button>
+            <div className="preview-actions">
+              {previewOrder.type === 'parcel' && previewOrder.status !== 'paid' && previewOrder.status !== 'voided' && <button className="preview-recall" onClick={() => setShowParcelCustomerDialog(true)}><Users size={16} />Customer · optional</button>}
+              <button className="preview-recall" onClick={() => recallBill(previewOrder)}><Search size={16} />Recall & edit bill</button>
+              {(previewOrder.type === 'dine_in' || previewOrder.type === 'parcel') && <button className="preview-cash" onClick={() => void takeCashAndClose(previewOrder)} disabled={!canCashClose}><Wallet size={16} />{cashChecking || paymentSubmitting ? 'Checking cash…' : 'Cash · close bill'}</button>}
+              {previewOrder.type === 'delivery' && staffHasPermission(staff.role, 'payments:record') && (deliveryCashOutBlockReason(previewOrder)
+                ? <div className="preview-cash-unavailable"><span>{deliveryCashOutBlockReason(previewOrder)}</span><button type="button" onClick={() => { setPreviewOrder(null); setActiveOrder(null); setShowDeliverySchedule(true) }}>Open Delivery schedule</button></div>
+                : <button className="preview-cash" onClick={() => void openDeliveryCashOut(previewOrder)} disabled={cashChecking}><Wallet size={16} />{cashChecking ? 'Checking bill…' : 'Cash out · manager PIN'}</button>)}
+            </div>
           </aside>}
           <section className={`catalog-panel ${tableViewOpen || deliveryOrderOpen || parcelOrderOpen ? 'table-order-catalog' : serviceSection === 'delivery' || serviceSection === 'parcel' ? 'delivery-slot-catalog' : ''}`}>
             {!!savedBills.length && <div className="alert success-alert" role="status"><span>{savedBills.length} bill{savedBills.length === 1 ? '' : 's'} saved by waiters. Payment still due.</span><button onClick={() => setShowSavedBills(true)}>View Saved Bills</button></div>}
+            {!orderEditorOpen && error && <div className="alert error-alert" role="alert"><span>{error}</span></div>}
+            {!orderEditorOpen && savedMessage && <div className="alert success-alert" role="status"><Check size={16} />{savedMessage}</div>}
             {activeOrder?.savedAt && activeOrder.status !== 'paid' && activeOrder.status !== 'voided' && <div className="alert success-alert"><span>Saved bill #{activeOrder.orderNumber} · Former table {activeOrder.savedTableName} · {activeOrder.savedTableFloor} · Saved by {activeOrder.savedBy}. Review the items and record payment to close this bill.</span></div>}
-            {!tableViewOpen && !deliveryOrderOpen && !parcelOrderOpen && <div className="page-heading">
+            {!tableViewOpen && !deliveryOrderOpen && !parcelOrderOpen && serviceSection !== 'parcel' && serviceSection !== 'delivery' && <div className="page-heading">
               <div>
                 <div className="eyebrow">{serviceSection === 'tables' ? tableViewOpen ? 'DINE-IN ORDER' : 'SERVICE FLOOR' : 'NEW ORDER'}</div>
-                <h1>{serviceSection === 'tables' ? tableViewOpen && selectedTableData ? `Table ${selectedTableData.name}` : floor : serviceSection === 'parcel' ? 'Takeaway' : 'Home delivery'}</h1>
-                <p>{serviceSection === 'tables' ? tableViewOpen ? `Add dishes to this table's bill · ${selectedTableData?.floor ?? floor}` : 'Select a table to start or continue an order.' : serviceSection === 'parcel' ? 'Create a pickup order for your guest.' : 'Create an order and add delivery details.'}</p>
+                <h1>{serviceSection === 'tables' ? tableViewOpen && selectedTableData ? `Table ${selectedTableData.name}` : floor : 'Home delivery'}</h1>
+                <p>{serviceSection === 'tables' ? tableViewOpen ? `Add dishes to this table's bill · ${selectedTableData?.floor ?? floor}` : `Select a table to start or continue an order. Shortcuts: ${cardShortcuts.ground} Ground Floor · ${cardShortcuts.first} Floor 1.` : 'Create an order and add delivery details.'}</p>
               </div>
               {serviceSection === 'tables' && !tableViewOpen && (
                 <div className="floor-switch">
@@ -1163,22 +1627,27 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             {serviceSection === 'delivery' && !deliveryOrderOpen && (
               <section className="delivery-slot-board" aria-labelledby="delivery-slots-title">
                 <div className="delivery-slot-heading">
-                  <div><div className="eyebrow">HOME DELIVERY</div><h1 id="delivery-slots-title">Delivery orders</h1><p>Select an available HD number to start, or an active one to continue.</p></div>
-                  <div className="delivery-slot-count"><b>{occupiedDeliverySlots}</b><span>of 100 active</span></div>
+                  <div><h1 id="delivery-slots-title">{deliveryBoardAssignment ? `Assign HD bills · ${deliveryBoardAssignment.riderName}` : 'Delivery orders'}</h1><p>{deliveryBoardAssignment ? 'Tap each eligible HD card to select it. Selected cards turn green.' : `Shortcut: ${cardShortcuts.delivery} opens the first available delivery card.`}</p></div>
+                  <div className="delivery-slot-heading-actions"><label className="delivery-card-search"><Search size={15} /><input value={deliveryCardSearch} onChange={event => setDeliveryCardSearch(event.target.value)} placeholder="Search name, phone or place" aria-label="Search delivery cards by customer, phone or place" />{deliveryCardSearch && <button type="button" onClick={() => setDeliveryCardSearch('')}>Clear</button>}</label><div className="delivery-slot-count"><b>{occupiedDeliverySlots}</b><span>of {deliverySlots.length} active</span></div></div>
                 </div>
                 <div className="delivery-slot-grid service-slot-grid">
-                  {deliverySlots.map(({ deliveryNumber, order }) => (
+                  {visibleDeliverySlots.map(({ deliveryNumber, order }) => {
+                    const assignmentEligible = Boolean(order && deliveryBoardAssignment
+                      && order.deliveryStatus === 'pending' && !order.deliveryRiderId
+                      && ['ordering', 'preparing', 'ready'].includes(order.status) && order.status !== 'voided')
+                    const assignmentSelected = Boolean(order && deliveryBoardAssignment?.orderIds.includes(order.id))
+                    return (
                     <article key={deliveryNumber} className={`service-slot-tile timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'}`}>
                     <button
-                      className={`delivery-slot-card ${order ? 'occupied' : 'available'} timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'}`}
-                      onClick={() => chooseDeliverySlot(deliveryNumber)}
-                      disabled={Boolean(failedSubmission) || submitting}
+                      className={`delivery-slot-card ${order ? 'occupied' : 'available'} timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'} ${assignmentSelected ? 'assignment-selected' : ''} ${deliveryBoardAssignment && !assignmentEligible ? 'assignment-unavailable' : ''}`}
+                      onClick={() => deliveryBoardAssignment && order ? toggleDeliveryBoardAssignment(order) : chooseDeliverySlot(deliveryNumber)}
+                      disabled={deliveryBoardAssignment ? !assignmentEligible || deliveryBoardAssignmentBusy : Boolean(failedSubmission) || submitting}
                       aria-label={order
                         ? `Continue HD-${deliveryNumber}, ${order.customerName}, ${order.assignedDeliveryTo ? `rider ${order.assignedDeliveryTo}` : 'no rider assigned'}, elapsed ${elapsedClockLabel(order.createdAt, deliveryTimerNow)}, ${order.scheduledDeliveryAt ? `scheduled ${new Date(order.scheduledDeliveryAt).toLocaleString('en-IN')}` : 'no delivery time scheduled'}, ${formatMoney(order.totalPaise)}`
                         : `Start delivery order HD-${deliveryNumber}`}
                     >
                       <span className="delivery-slot-number">HD-{deliveryNumber}</span>
-                      <span className="delivery-slot-status"><i />{order ? order.status.replace('_', ' ') : 'Available'}</span>
+                      <span className="delivery-slot-status"><i />{order ? deliveryCashOutBlockReason(order) ? order.deliveryStatus : order.status.replace('_', ' ') : 'Available'}</span>
                       {order && (
                         <>
                           <span className="delivery-slot-place">
@@ -1201,21 +1670,24 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                         </>
                       )}
                     </button>
-                    {order && window.desktopPrinting && <div className="table-print-actions"><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'bill' })}><Printer size={13} />Print Bill</button><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'kot' })}><Printer size={13} />Print KOT</button></div>}
+                    {order && window.desktopPrinting && !deliveryBoardAssignment && <div className="table-print-actions"><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'bill' })}><Printer size={13} />Print Bill</button><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'kot' })}><Printer size={13} />Print KOT</button></div>}
                     </article>
-                  ))}
+                    )
+                  })}
                 </div>
+                {!!deliveryCardSearch.trim() && visibleDeliverySlots.length === 0 && <p className="delivery-card-search-empty">No HD card matches “{deliveryCardSearch.trim()}”.</p>}
+                {deliveryBoardAssignment && <div className="delivery-board-assignment-actions"><span><b>{deliveryBoardAssignment.orderIds.length}</b> HD bill{deliveryBoardAssignment.orderIds.length === 1 ? '' : 's'} selected for {deliveryBoardAssignment.riderName}</span><div><button onClick={() => { setDeliveryBoardAssignment(null); setShowDeliverySchedule(true) }} disabled={deliveryBoardAssignmentBusy}>Cancel</button><button className="primary" onClick={() => void saveDeliveryBoardAssignment()} disabled={!deliveryBoardAssignment.orderIds.length || deliveryBoardAssignmentBusy}>{deliveryBoardAssignmentBusy ? 'Assigning and printing…' : `Assign and print ${deliveryBoardAssignment.orderIds.length} bill${deliveryBoardAssignment.orderIds.length === 1 ? '' : 's'}`}</button></div></div>}
               </section>
             )}
 
             {serviceSection === 'parcel' && !parcelOrderOpen && (
               <section className="delivery-slot-board" aria-labelledby="parcel-slots-title">
                 <div className="delivery-slot-heading">
-                  <div><div className="eyebrow">TAKEAWAY</div><h1 id="parcel-slots-title">Pickup orders</h1><p>Select an available P number to start, or an active one to continue.</p></div>
-                  <div className="delivery-slot-count"><b>{occupiedParcelSlots}</b><span>of 100 active</span></div>
+                  <div><h1 id="parcel-slots-title">Parcel orders</h1><p>Shortcut: {cardShortcuts.parcel} opens the first available parcel card.</p></div>
+                  <div className="delivery-slot-heading-actions"><label className="delivery-card-search"><Search size={15} /><input value={parcelCardSearch} onChange={event => setParcelCardSearch(event.target.value)} placeholder="Search name or phone" aria-label="Search parcel cards by customer or phone" />{parcelCardSearch && <button type="button" onClick={() => setParcelCardSearch('')}>Clear</button>}</label><div className="delivery-slot-count"><b>{occupiedParcelSlots}</b><span>of {parcelSlots.length} active</span></div></div>
                 </div>
                 <div className="delivery-slot-grid service-slot-grid">
-                  {parcelSlots.map(({ parcelNumber, order }) => (
+                  {visibleParcelSlots.map(({ parcelNumber, order }) => (
                     <article key={parcelNumber} className={`service-slot-tile timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'}`}>
                     <button
                       className={`delivery-slot-card ${order ? 'occupied' : 'available'} timer-${order ? tableOrderTimer({ orderId: order.id, startedAt: order.createdAt }, deliveryTimerNow).state : 'available'}`}
@@ -1225,12 +1697,13 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                     >
                       <span className="delivery-slot-number">P-{parcelNumber}</span>
                       <span className="delivery-slot-status"><i />{order ? order.status.replace('_', ' ') : 'Available'}</span>
-                      {order && <><span className="delivery-slot-customer">{order.customerName}</span><span className="delivery-slot-meta delivery-slot-elapsed">{elapsedClockLabel(order.createdAt, deliveryTimerNow) || 'Timer unavailable'}</span><b className="delivery-slot-total">{formatMoney(order.totalPaise)}</b></>}
+                      {order && <><span className="delivery-slot-customer">{order.customerName || order.contactNumber}</span><span className="delivery-slot-meta delivery-slot-elapsed">{elapsedClockLabel(order.createdAt, deliveryTimerNow) || 'Timer unavailable'}</span><b className="delivery-slot-total">{formatMoney(order.totalPaise)}</b></>}
                     </button>
-                    {order && window.desktopPrinting && <div className="table-print-actions"><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'bill' })}><Printer size={13} />Print Bill</button><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'kot' })}><Printer size={13} />Print KOT</button></div>}
+                    {order && <div className="table-print-actions"><button onClick={() => { chooseParcelSlot(parcelNumber); setShowParcelCustomerDialog(true) }} disabled={Boolean(failedSubmission) || submitting || order.status === 'paid' || order.status === 'voided'}><Users size={13} />Customer</button>{window.desktopPrinting && <><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'bill' })}><Printer size={13} />Print Bill</button><button onClick={() => setTablePrint({ table: printTargetForOrder(order), kind: 'kot' })}><Printer size={13} />Print KOT</button></>}</div>}
                     </article>
                   ))}
                 </div>
+                {!!parcelCardSearch.trim() && visibleParcelSlots.length === 0 && <p className="delivery-card-search-empty">No parcel card matches “{parcelCardSearch.trim()}”.</p>}
               </section>
             )}
 
@@ -1270,6 +1743,30 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           </section>
 
           {orderEditorOpen && <aside className={`order-panel ${serviceSection === 'delivery' ? 'delivery-order-panel' : ''}`}>
+            <div className="bill-search-toolbar">
+              <div className="bill-item-search" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false) }}>
+                <div className="search-box"><Search size={17} />
+                  <input id="bill-menu-search" aria-label="Search menu items" ref={searchInputRef} value={search} role="combobox" aria-autocomplete="list" aria-expanded={searchOpen} aria-controls="bill-menu-results" aria-activedescendant={searchOpen && searchResults[searchSelection] ? `bill-menu-result-${searchResults[searchSelection].id}` : undefined} onChange={event => { setSearch(event.target.value); setSearchSelection(0); setSearchOpen(Boolean(event.target.value.trim())) }} onKeyDown={event => {
+                    if (event.key === 'ArrowDown') { event.preventDefault(); setSearchSelection(current => searchOpen ? Math.min(current + 1, Math.max(0, searchResults.length - 1)) : 0); setSearchOpen(true) }
+                    else if (event.key === 'ArrowUp') { event.preventDefault(); setSearchSelection(current => searchOpen ? Math.max(current - 1, 0) : Math.max(0, searchResults.length - 1)); setSearchOpen(true) }
+                    else if (event.key === 'Enter') { event.preventDefault(); if (searchResults[searchSelection] && (searchOpen || search.trim())) addSearchResult(searchResults[searchSelection]) }
+                    else if (event.key === 'Escape') { event.preventDefault(); setSearchOpen(false) }
+                  }} placeholder="Search item" disabled={Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'} autoComplete="off" />
+                  <button className="menu-search-arrow" type="button" aria-label={searchOpen ? 'Hide menu suggestions' : 'Show menu suggestions'} aria-expanded={searchOpen} aria-controls="bill-menu-results" onMouseDown={event => event.preventDefault()} onClick={() => { if (searchOpen) setSearchOpen(false); else { searchInputRef.current?.focus(); setSearchOpen(true) } }} disabled={Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}><ChevronDown size={18} /></button>
+                </div>
+                {searchOpen && <div id="bill-menu-results" ref={searchResultsRef} className="bill-search-results" role="listbox" aria-label="Menu search results">
+                  {searchResults.length ? searchResults.map((product, index) => <button key={product.id} id={`bill-menu-result-${product.id}`} className={`bill-search-result ${index === searchSelection ? 'selected' : ''}`} role="option" aria-selected={index === searchSelection} onMouseEnter={() => setSearchSelection(index)} onClick={() => addSearchResult(product)} disabled={Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}><span><b>{product.name}</b><small>{menu?.categories.find(category => category.id === product.categoryId)?.name ?? product.categoryId}</small></span><strong>{formatMoney(product.pricePaise)}</strong><Plus size={16} /></button>) : <div className="bill-search-empty">No available menu items found.</div>}
+                </div>}
+              </div>
+              <button type="button" onClick={() => { setCategoryId('all'); document.querySelector('.table-order-menu .category-list')?.scrollIntoView({ block: 'nearest' }) }}>Category</button>
+              <button type="button" aria-expanded={showKitchenMessage} aria-controls="order-kitchen-message" onClick={() => setShowKitchenMessage(open => !open)} disabled={Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}>Kitchen msg</button>
+              <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { if (searchResults[searchSelection]) addSearchResult(searchResults[searchSelection]) }} disabled={(!searchOpen && !search.trim()) || !searchResults[searchSelection] || Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}>Enter</button>
+              <button type="button" onClick={() => document.getElementById('bill-extra-actions')?.scrollIntoView({ block: 'nearest' })}>Xtra</button>
+            </div>
+            {showKitchenMessage && <label id="order-kitchen-message" className="order-kitchen-message">Message for kitchen ticket
+              <textarea value={kitchenMessage} onChange={event => setKitchenMessage(event.target.value)} maxLength={300} placeholder="Example: No onion; prepare this order first" disabled={Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'} />
+              <small>Saved with this order and shown on the kitchen ticket. Press Done to send it.</small>
+            </label>}
             <div className="order-panel-heading">
               <div><div className="eyebrow">CURRENT BILL</div><h2>{activeOrder ? `Order ${formatOrderReference(activeOrder)}` : orderType === 'delivery' ? 'New delivery' : orderType === 'parcel' ? 'New takeaway' : 'New order'}</h2></div>
               <div className="bill-header-actions">
@@ -1307,50 +1804,37 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                     <label><span>Delivery instructions</span><textarea value={deliveryInstructions} onChange={(event) => setDeliveryInstructions(event.target.value)} maxLength={300} rows={2} placeholder="Optional rider instructions" disabled={Boolean(failedSubmission) || activeOrder.status === 'paid' || activeOrder.status === 'voided'} /></label>
                   </>
                 )}
-                {orderType === 'parcel' && <label><span>Pickup name</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Name for this order" disabled={Boolean(failedSubmission) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'} /></label>}
+                {orderType === 'parcel' && <div className="parcel-customer-option"><span>Customer details are optional</span><button type="button" onClick={() => setShowParcelCustomerDialog(true)} disabled={!activeOrder || Boolean(failedSubmission) || submitting || activeOrder.status === 'paid' || activeOrder.status === 'voided'}>Customer · search or add</button>{activeOrder?.contactNumber && <small>{activeOrder.customerName || 'Customer'} · {activeOrder.contactNumber}</small>}</div>}
               </div>
             )}
             <div className="order-status-row"><span className={`status-dot ${activeOrder?.status ?? 'ordering'}`} />{activeOrder?.status === 'paid' ? 'Paid' : activeOrder?.status === 'voided' ? 'Voided' : activeOrder?.savedAt ? 'Saved · payment due' : activeOrder ? `Open · ${activeOrder.status.replace('_', ' ')}` : 'Not submitted'}<span>{itemCount} {itemCount === 1 ? 'item' : 'items'}</span></div>
-            <div className="bill-item-search">
-              <label className="search-box" htmlFor="bill-menu-search">
-                <Search size={17} />
-                <input
-                  id="bill-menu-search"
-                  ref={searchInputRef}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && searchResults[0]) {
-                      event.preventDefault()
-                      addSearchResult(searchResults[0])
-                    }
-                  }}
-                  placeholder="Find a menu item…"
-                  disabled={Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}
-                  autoComplete="off"
-                />
-                <kbd>Ctrl K</kbd>
-              </label>
-              {search.trim() && (
-                <div className="bill-search-results" role="listbox" aria-label="Menu search results">
-                  {searchResults.length > 0 ? searchResults.map((product) => (
-                    <button
-                      key={product.id}
-                      className="bill-search-result"
-                      role="option"
-                      aria-selected="false"
-                      onClick={() => addSearchResult(product)}
-                      disabled={Boolean(failedSubmission) || submitting || Boolean(activeOrder?.savedAt) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'}
-                    >
-                      <span><b>{product.name}</b><small>{menu?.categories.find((category) => category.id === product.categoryId)?.name ?? product.categoryId}</small></span>
-                      <strong>{formatMoney(product.pricePaise)}</strong>
-                      <Plus size={16} />
-                    </button>
-                  )) : <div className="bill-search-empty">No available menu items found.</div>}
-                </div>
+            <div className="bill-items-heading"><strong>Bill items</strong><span>{itemCount} {itemCount === 1 ? 'item' : 'items'}</span></div>
+            <div className="cart-content">
+              {existingLines.length === 0 && cart.length === 0 ? (
+                <div className="empty-cart"><div className="empty-cart-icon"><ShoppingBag size={23} /></div><b>Your order starts here</b><span>Choose a table, then tap a dish to add it.</span></div>
+              ) : (
+                <>
+                  {existingLines.length > 0 && <div className="cart-section-title">SAVED ITEMS <span>Already on order</span></div>}
+                  {existingLines.map((item) => <div className="cart-item saved-item" key={item.id}><div className="cart-item-info"><strong>{item.productName}</strong>{item.note && <small>Note: {item.note}</small>}<span>{item.quantity} × {formatMoney(item.unitPricePaise)}</span></div><div className="cart-item-right"><button className="remove-line-button" onClick={() => setShowItemVoid(true)} aria-label={`Void ${item.productName}`} title="Void item or quantity" disabled={!canVoidItem}><Ban size={14} /></button><b>{formatMoney(item.quantity * item.unitPricePaise)}</b></div></div>)}
+                  {cart.length > 0 && <div className="cart-section-title">{activeOrder ? 'ADD TO ORDER' : 'ORDER ITEMS'}<span>Unsaved</span></div>}
+                  {cart.map(({ product, quantity, note }) => (
+                    <div className={`cart-item draft-item ${selectedDraftProductId === product.id ? 'shortcut-selected-item' : ''}`} key={product.id}>
+                      <div className="cart-item-info"><strong>{product.name}</strong><span>{formatMoney(product.pricePaise)} each</span><input aria-label={`Note for ${product.name}`} className="item-note" value={note} onChange={(event) => updateNote(product.id, event.target.value)} placeholder="+ Add a note" disabled={Boolean(failedSubmission) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'} /></div>
+                      <div className="cart-item-right">
+                        <div className="cart-line-controls">
+                          <button type="button" className="shortcut-select-item" onClick={() => setSelectedDraftProductId(product.id)} aria-label={`Select ${product.name} for quantity shortcut`} aria-pressed={selectedDraftProductId === product.id}>Select</button>
+                          <div className="quantity-stepper"><button onClick={() => changeQuantity(product.id, -1)} aria-label={`Remove one ${product.name}`} disabled={Boolean(failedSubmission)}><Minus size={12} /></button><span>{quantity}</span><button onClick={() => changeQuantity(product.id, 1)} aria-label={`Add one ${product.name}`} disabled={Boolean(failedSubmission)}><Plus size={12} /></button></div>
+                          <button className="remove-line-button" onClick={() => removeDraftLine(product.id)} aria-label={`Remove ${product.name} from unsaved items`} title="Remove unsaved item" disabled={Boolean(failedSubmission)}><Trash2 size={14} /></button>
+                        </div>
+                        <b>{formatMoney(quantity * product.pricePaise)}</b>
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
-            <div className="right-action-grid" aria-label="Bill actions">
+            <div id="bill-extra-actions" className="right-action-grid" aria-label="Bill actions"><div className="bill-actions-title">More bill actions</div>
+              {canManageSettings && <button className="right-action" onClick={() => setShowOrderShortcuts(true)} title="Customize keyboard shortcuts on this device"><Keyboard size={15} />Shortcuts</button>}
               <button className="right-action danger" onClick={() => setManagerDialogMode('void')} disabled={!canVoidBill} title={!canVoidBills ? 'Manager or owner permission is required to void bills' : !hasManagerPin ? 'Set a manager PIN before voiding bills' : cart.length > 0 || discountChanged ? 'Save or clear unsaved changes before voiding' : 'Voiding requires a manager PIN and a reason'}>
                 <Ban size={15} />Void bill
               </button>
@@ -1360,7 +1844,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               <button className="right-action" onClick={() => setShowSplitBill(true)} disabled={!canSplitBill} title={!canSplitBill ? 'Select an unpaid dine-in bill with two or more items and no unsaved changes' : 'Move selected quantities to a new independent bill'}>
                 <CopyPlus size={15} />Split bill
               </button>
-              <button className="right-action" onClick={() => setShowJoinBill(true)} disabled={!canJoinBill} title={!canJoinBill ? 'Open an unpaid dine-in bill and keep another active dine-in bill available' : 'Combine this bill with another active dine-in bill'}>
+              <button className="right-action" onClick={() => setShowJoinBill(true)} disabled={!canJoinBill} title={!canJoinBill ? 'Save the current draft before joining bills' : 'Choose two active dine-in bills to combine'}>
                 <GitMerge size={15} />Join bills
               </button>
               <button className="right-action" onClick={() => setShowRecallBill(true)} disabled={!recallableBills.length} title="Open an active dine-in, takeaway, or delivery bill for editing">
@@ -1375,29 +1859,6 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
                 <Printer size={15} />{window.desktopPrinting && activeOrder?.type === 'dine_in' ? 'Print KOT' : 'Duplicate KOT'}
               </button>
               {activeOrder?.status === 'voided' && <span className="void-reason-note">Reason: {activeOrder.voidReason}</span>}
-            </div>
-            <div className="cart-content">
-              {existingLines.length === 0 && cart.length === 0 ? (
-                <div className="empty-cart"><div className="empty-cart-icon"><ShoppingBag size={23} /></div><b>Your order starts here</b><span>Choose a table, then tap a dish to add it.</span></div>
-              ) : (
-                <>
-                  {existingLines.length > 0 && <div className="cart-section-title">SAVED ITEMS <span>Already on order</span></div>}
-                  {existingLines.map((item) => <div className="cart-item saved-item" key={item.id}><div className="cart-item-info"><strong>{item.productName}</strong>{item.note && <small>Note: {item.note}</small>}<span>{item.quantity} × {formatMoney(item.unitPricePaise)}</span></div><div className="cart-item-right"><button className="remove-line-button" onClick={() => setShowItemVoid(true)} aria-label={`Void ${item.productName}`} title="Void item or quantity" disabled={!canVoidItem}><Ban size={14} /></button><b>{formatMoney(item.quantity * item.unitPricePaise)}</b></div></div>)}
-                  {cart.length > 0 && <div className="cart-section-title">{activeOrder ? 'ADD TO ORDER' : 'ORDER ITEMS'}<span>Unsaved</span></div>}
-                  {cart.map(({ product, quantity, note }) => (
-                    <div className="cart-item draft-item" key={product.id}>
-                      <div className="cart-item-info"><strong>{product.name}</strong><span>{formatMoney(product.pricePaise)} each</span><input aria-label={`Note for ${product.name}`} className="item-note" value={note} onChange={(event) => updateNote(product.id, event.target.value)} placeholder="+ Add a note" disabled={Boolean(failedSubmission) || activeOrder?.status === 'paid' || activeOrder?.status === 'voided'} /></div>
-                      <div className="cart-item-right">
-                        <div className="cart-line-controls">
-                          <div className="quantity-stepper"><button onClick={() => changeQuantity(product.id, -1)} aria-label={`Remove one ${product.name}`} disabled={Boolean(failedSubmission)}><Minus size={12} /></button><span>{quantity}</span><button onClick={() => changeQuantity(product.id, 1)} aria-label={`Add one ${product.name}`} disabled={Boolean(failedSubmission)}><Plus size={12} /></button></div>
-                          <button className="remove-line-button" onClick={() => removeDraftLine(product.id)} aria-label={`Remove ${product.name} from unsaved items`} title="Remove unsaved item" disabled={Boolean(failedSubmission)}><Trash2 size={14} /></button>
-                        </div>
-                        <b>{formatMoney(quantity * product.pricePaise)}</b>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
             </div>
             <div className="discount-editor">
               <label htmlFor="discount-mode">Discount</label>
@@ -1434,7 +1895,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
               <div className="bill-total"><span>Total due</span><b>{formatMoney(totalPaise)}</b></div>
             </div>
             <button className="submit-order" onClick={startSubmit} disabled={failedSubmission ? submitting : !canSaveInvoice}>
-              {submitting ? <><span className="button-spinner" />Saving to this device…</> : failedSubmission ? <><ArrowUpRight size={17} />Retry saving invoice</> : activeOrder && cart.length === 0 ? <><Check size={17} />Update invoice</> : activeOrder ? <><Plus size={17} />Done · Save changes</> : <><Check size={17} />Done · Save bill</>}
+              {submitting ? <><span className="button-spinner" />Saving to this device…</> : failedSubmission ? <><ArrowUpRight size={17} />Retry saving invoice</> : deliveryCustomerStaged ? <><Check size={17} />Done · prepare KOT</> : activeOrder && cart.length === 0 ? <><Check size={17} />Update invoice</> : activeOrder ? <><Plus size={17} />Done · Save changes</> : <><Check size={17} />Done · Save bill</>}
               {!submitting && !failedSubmission && <span>{formatMoney(totalPaise)}</span>}
             </button>
             <div className="save-note"><span className="online-dot" /> {connected ? 'Shared branch data' : 'Saved locally on this device'} <span>·</span> {connected ? 'Desktop and waiter phones' : 'No cloud sync'}</div>
@@ -1497,13 +1958,13 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             )}
           </aside>}
         </div>
-        <nav className="pos-action-bar" aria-label="POS quick actions">
+        <nav className={`pos-action-bar ${serviceSection !== 'delivery' ? 'with-cash' : ''} ${orderEditorOpen ? 'order-entry-actions' : ''}`} aria-label="POS quick actions">
           <button onClick={startNewTableOrder} disabled={!selectedTable || serviceSection !== 'tables' || submitting}><Plus size={17} /><span>New</span></button>
           <button onClick={() => activeOrder && setShowInvoice(true)} disabled={!activeOrder}><Printer size={17} /><span>Receipt</span></button>
           <button onClick={() => setShowPaymentLedger(true)} disabled={!activeOrder || activeOrder.status === 'voided' || cart.length > 0}><CreditCard size={17} /><span>Payment</span></button>
           <button onClick={() => setShowRecallBill(true)} disabled={!recallableBills.length}><Search size={17} /><span>Recall</span></button>
           <button onClick={() => activeOrder && setShowSplitBill(true)} disabled={!canSplitBill}><CopyPlus size={17} /><span>Split</span></button>
-          <button onClick={() => activeOrder && setShowJoinBill(true)} disabled={!canJoinBill}><GitMerge size={17} /><span>Join</span></button>
+          <button onClick={() => setShowJoinBill(true)} disabled={!canJoinBill} title={!canJoinBill ? 'Save the current draft before joining bills' : 'Choose two active dine-in bills to combine'}><GitMerge size={17} /><span>Join</span></button>
           <button onClick={() => {
             if (!activeOrder) return
             if (window.desktopPrinting && printableTable) setTablePrint({ table: printableTable, kind: 'bill' })
@@ -1514,10 +1975,12 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             if (window.desktopPrinting && printableTable) setTablePrint({ table: printableTable, kind: 'kot' })
             else void openDuplicateKot()
           }} disabled={!activeOrder || cart.length > 0 || activeOrder.status === 'paid' || activeOrder.status === 'voided'}><Printer size={17} /><span>Print KOT</span></button>
+          {serviceSection !== 'delivery' && <button className="quick-cash-action" onClick={() => activeOrder && void takeCashAndClose(activeOrder)} disabled={!canCashClose} title="Confirm cash received and close the selected dining or parcel bill"><Wallet size={17} /><span>Cash</span></button>}
           <button onClick={() => { if (tableViewOpen) setTableViewOpen(false); else returnToServiceSlots() }} disabled={!tableViewOpen && !deliveryOrderOpen && !parcelOrderOpen}><Check size={17} /><span>Close</span></button>
         </nav>
       </main>
       {showInvoice && activeOrder && <InvoicePreview order={activeOrder} payment={lastPayment} onClose={() => setShowInvoice(false)} />}
+      {showOrderShortcuts && canManageSettings && <OrderShortcutsDialog shortcuts={orderShortcuts} onClose={() => setShowOrderShortcuts(false)} onSave={value => { setOrderShortcuts(value); setShowOrderShortcuts(false) }} />}
       {showKitchenTicket && activeOrder && (
         <KitchenTicketPreview
           order={activeOrder}
@@ -1537,20 +2000,32 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
             deliveryArea: activeOrder.deliveryArea,
             deliveryLandmark: activeOrder.deliveryLandmark,
             deliveryInstructions: activeOrder.deliveryInstructions,
+            scheduledDeliveryAt: activeOrder.scheduledDeliveryAt,
           }}
-          onSave={completeDeliveryCustomerDetails}
+          onBack={() => setShowDeliveryCustomerDialog(false)}
+          onStage={stageDeliveryCustomerDetails}
+          onDone={completeDeliveryCustomerDetails}
         />
       )}
+      {showParcelCustomerDialog && activeOrder?.type === 'parcel' && <ParcelCustomerDialog
+        reference={formatOrderReference(activeOrder)} initialNumber={activeOrder.contactNumber}
+        onClose={() => setShowParcelCustomerDialog(false)} onSelect={selectParcelCustomer} />}
       {managerDialogMode && (
         <ManagerActionDialog
           key={managerDialogMode}
           mode={managerDialogMode}
           billNumber={activeOrder?.orderNumber}
-          onClose={() => setManagerDialogMode(null)}
+          onClose={() => { setManagerDialogMode(null); setManagementSetupRequested(false) }}
           onSetPin={handleSetManagerPin}
           onVoid={handleVoidOrder}
         />
       )}
+      {deliveryCashOut && <DeliveryCashOutDialog key={deliveryCashOut.requestId} order={deliveryCashOut.order}
+        balancePaise={deliveryCashOut.balancePaise} onClose={() => setDeliveryCashOut(null)} onConfirm={confirmDeliveryCashOut} />}
+      {cashSummary && !cashSummary.currentOpening && !showManagement && staffHasPermission(staff.role, 'payments:record') &&
+        <CashOpeningDialog summary={cashSummary} onOpen={handleOpenCash} onSignOut={handleStaffLogout} />}
+      {showManagementPin && <ManagementPinDialog onClose={() => setShowManagementPin(false)} onAuthorize={handleAuthorizeManagement}
+        canReset={staff.role === 'owner'} onReset={handleResetManagementPin} />}
       {showItemVoid && activeOrder && (
         <ItemVoidDialog
           order={activeOrder}
@@ -1559,7 +2034,7 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
         />
       )}
       {showSplitBill && activeOrder && <SplitBillDialog order={activeOrder} onClose={() => setShowSplitBill(false)} onSplit={handleSplitBill} />}
-      {showJoinBill && activeOrder && <JoinBillDialog order={activeOrder} candidates={joinCandidates} onClose={() => setShowJoinBill(false)} onJoin={handleJoinBills} />}
+      {showJoinBill && <JoinBillDialog orders={joinableBills} selectedOrderId={activeOrder?.id} tables={menu?.tables ?? []} onClose={() => setShowJoinBill(false)} onJoin={handleJoinBills} />}
       {showRecallBill && <RecallBillDialog orders={recallableBills} onClose={() => setShowRecallBill(false)} onRecall={recallBill} />}
       {showDeliveryScheduleDialog && selectedDeliveryNumber !== null && (
         <DeliveryActionDialog
@@ -1587,13 +2062,14 @@ function CashierPage({ branchName = 'Restaurant', onChangeBranch }: { branchName
           setActiveOrder(order); setBillHistory(history); setLastPayment(history.find(entry => entry.order.id === activeOrder.id)?.payment ?? null)
         }).catch(cause => setError(cause instanceof Error ? cause.message : 'Unable to refresh payments.'))
       }} />}
-      {showManagement && <RestaurantManagement staff={staff} onClose={() => { setShowManagement(false); void refreshMenu().catch(cause => setError(cause instanceof Error ? cause.message : 'Unable to refresh menu.')) }} />}
+      {showManagement && staffHasPermission(staff.role, 'menu:manage') && <RestaurantManagement staff={staff} theme={theme} onThemeChange={setTheme} cardShortcuts={cardShortcuts} onCardShortcutsChange={setCardShortcuts} orderShortcuts={orderShortcuts} onOrderShortcutsChange={setOrderShortcuts} onClose={() => { setShowManagement(false); void refreshMenu().catch(cause => setError(cause instanceof Error ? cause.message : 'Unable to refresh menu.')) }} />}
       {showWaiter && <WaiterScreen staff={staff} onClose={() => { setShowWaiter(false); void refreshMenu().catch(cause => setError(String(cause))) }} />}
       {showDeliverySchedule && canViewDeliveries && (
         <DeliveryScheduleScreen
           canManageRiders={canManageDeliveryRiders}
           canReassign={canReassignDeliveries}
           onClose={() => void closeDeliverySchedule()}
+          onSelectHdCardsForAssignment={beginDeliveryBoardAssignment}
         />
       )}
     </div>

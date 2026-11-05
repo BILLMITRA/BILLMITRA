@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { findSavedDeliveryCustomer } from './deliveryCustomers.cjs'
+import { findSavedDeliveryCustomer, listSavedDeliveryCustomers, saveSavedDeliveryCustomer } from './deliveryCustomers.cjs'
 
 let database: DatabaseSync
 
@@ -19,7 +19,57 @@ beforeEach(() => {
       delivery_landmark TEXT NOT NULL DEFAULT '',
       delivery_instructions TEXT NOT NULL DEFAULT ''
     );
+    CREATE TABLE customer_profiles (
+      id TEXT PRIMARY KEY, normalized_phone TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_order_at TEXT
+    );
+    CREATE TABLE customer_addresses (
+      id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, address TEXT NOT NULL, area TEXT NOT NULL DEFAULT '',
+      landmark TEXT NOT NULL DEFAULT '', instructions TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE customer_order_links (order_id TEXT PRIMARY KEY, customer_id TEXT NOT NULL);
   `)
+})
+
+describe('delivery customer directory', () => {
+  const shan = { customerName: 'Shan', contactNumber: '9656684727', deliveryAddress: 'Vengara market',
+    deliveryArea: 'Vengara', deliveryLandmark: 'Near bus stand', deliveryInstructions: 'Call on arrival' }
+
+  it('saves a new customer and finds it by name, full phone, and last three digits', () => {
+    const saved = saveSavedDeliveryCustomer(database, shan)
+    expect(saved).toMatchObject({ customerName: 'Shan', contactNumber: '9656684727', deliveryAddress: 'Vengara market' })
+    expect(listSavedDeliveryCustomers(database, 'shan')[0].id).toBe(saved.id)
+    expect(listSavedDeliveryCustomers(database, '9656684727')[0].id).toBe(saved.id)
+    expect(listSavedDeliveryCustomers(database, '727')[0].id).toBe(saved.id)
+    expect(listSavedDeliveryCustomers(database, 'Vengara')[0].id).toBe(saved.id)
+  })
+
+  it('edits a customer and keeps the previous address in history', () => {
+    const first = saveSavedDeliveryCustomer(database, shan)
+    const updated = saveSavedDeliveryCustomer(database, { ...shan, id: first.id, customerName: 'Shan V',
+      contactNumber: '96566 84728', deliveryAddress: 'Vengara road', deliveryInstructions: 'After 6 PM' })
+    expect(updated).toMatchObject({ id: first.id, customerName: 'Shan V', contactNumber: '9656684728',
+      deliveryAddress: 'Vengara road', deliveryInstructions: 'After 6 PM' })
+    expect(listSavedDeliveryCustomers(database, '727')).toEqual([])
+    expect(database.prepare('SELECT count(*) AS count FROM customer_addresses WHERE customer_id = ?')
+      .get(first.id)).toMatchObject({ count: 2 })
+  })
+
+  it('does not create a second customer with an existing phone', () => {
+    saveSavedDeliveryCustomer(database, shan)
+    expect(() => saveSavedDeliveryCustomer(database, { ...shan, customerName: 'Other' })).toThrow('belongs to another saved customer')
+    expect(listSavedDeliveryCustomers(database, '')).toHaveLength(1)
+  })
+
+  it('saves a parcel customer with a three-digit code and no address', () => {
+    const saved = saveSavedDeliveryCustomer(database, { customerName: '', contactNumber: '928',
+      deliveryAddress: '', deliveryArea: '', deliveryLandmark: '', deliveryInstructions: '' })
+    expect(saved).toMatchObject({ contactNumber: '928', deliveryAddress: '' })
+    expect(listSavedDeliveryCustomers(database, '928')[0].id).toBe(saved.id)
+    expect(database.prepare('SELECT count(*) AS count FROM customer_addresses').get()).toMatchObject({ count: 0 })
+  })
 })
 
 afterEach(() => database.close())

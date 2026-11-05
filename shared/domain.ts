@@ -114,6 +114,10 @@ export interface CreateOrderInput {
   deliveryArea?: string
   deliveryLandmark?: string
   deliveryInstructions?: string
+  kitchenMessage?: string
+  deferKitchenTicket?: boolean
+  prepareKitchenTicket?: boolean
+  whatsappBillOptIn?: boolean
   orderId?: string
 }
 
@@ -154,6 +158,7 @@ export interface SavedOrder {
   deliveryArea: string
   deliveryLandmark: string
   deliveryInstructions: string
+  kitchenMessage: string
   type: OrderType
   status: OrderStatus
   tableId: string | null
@@ -232,6 +237,16 @@ export interface SavedDeliveryCustomerDetails {
   deliveryArea: string
   deliveryLandmark: string
   deliveryInstructions: string
+}
+
+export interface DeliveryCustomerRecord extends SavedDeliveryCustomerDetails {
+  id: string
+  lastOrderAt: string | null
+  lastOrderNumber: number | null
+}
+
+export interface SaveDeliveryCustomerInput extends SavedDeliveryCustomerDetails {
+  id?: string
 }
 
 export interface DeliveryRiderInput {
@@ -349,6 +364,7 @@ export interface BillHistoryEntry {
 }
 
 export interface MenuData {
+  cardSettings?: { parcelCount: number; deliveryCount: number }
   categories: Category[]
   products: Product[]
   tables: RestaurantTable[]
